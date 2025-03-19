@@ -75,6 +75,16 @@ if (runtime === 'node') {
   });
 }
 
+app.use('*', async (c, next) => {
+  // @ts-ignore
+  if (!app.authenticate) {
+    return next();
+  }
+
+  // @ts-ignore
+  return await app.authenticate(c, next);
+});
+
 /**
  * GET route for the root path.
  * Returns a greeting message.

@@ -4,13 +4,16 @@ async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeout: number,
-  requestHandler?: () => Promise<Response>
+  requestHandler?: () => Promise<Response>,
+  controller?: AbortController
 ) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  if (!controller) {
+    controller = new AbortController();
+  }
+  const timeoutId = setTimeout(() => controller?.abort(), timeout);
   const timeoutRequestOptions = {
     ...options,
-    signal: controller.signal,
+    signal: controller?.signal,
   };
 
   let response;
@@ -67,7 +70,8 @@ export const retryRequest = async (
   retryCount: number,
   statusCodesToRetry: number[],
   timeout: number | null,
-  requestHandler?: () => Promise<Response>
+  requestHandler?: () => Promise<Response>,
+  controller?: AbortController
 ): Promise<{
   response: Response;
   attempt: number | undefined;
@@ -75,23 +79,49 @@ export const retryRequest = async (
 }> => {
   let lastResponse: Response | undefined;
   let lastAttempt: number | undefined;
+  if (!controller) {
+    controller = new AbortController();
+  }
   const start = new Date();
   try {
     await retry(
       async (bail: any, attempt: number) => {
         try {
-          let response: Response;
+          let response: Response = new Response();
+
           if (timeout) {
             response = await fetchWithTimeout(
               url,
               options,
               timeout,
-              requestHandler
+              requestHandler,
+              controller
             );
           } else if (requestHandler) {
             response = await requestHandler();
           } else {
-            response = await fetch(url, options);
+            try {
+              options.signal = controller?.signal;
+              response = await fetch(url, options);
+            } catch (e: any) {
+              if (e.name === 'AbortError') {
+                response = new Response(JSON.stringify({
+                    error: {
+                      message: `Request Aborted by user`,
+                      type: 'timeout_error',
+                      param: null,
+                      code: null,
+                    },
+                  }),
+                  {
+                    headers: {
+                      'content-type': 'application/json',
+                    },
+                    status: 408,
+                  });
+              }
+            }
+
           }
           if (statusCodesToRetry.includes(response.status)) {
             const errorObj: any = new Error(await response.text());
@@ -159,6 +189,6 @@ export const retryRequest = async (
   return {
     response: lastResponse as Response,
     attempt: lastAttempt,
-    createdAt: start,
+    createdAt: start
   };
 };

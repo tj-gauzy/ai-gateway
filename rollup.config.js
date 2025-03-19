@@ -4,7 +4,7 @@ import json from '@rollup/plugin-json';
 import copy from 'rollup-plugin-copy';
 
 export default {
-  input: 'src/start-server.ts',
+  input: 'src/index.ts',
   output: {
     dir: 'build',
     format: 'es',

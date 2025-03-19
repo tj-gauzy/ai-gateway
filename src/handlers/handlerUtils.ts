@@ -1202,6 +1202,7 @@ export async function recursiveAfterRequestHookHandler(
       });
   }
 
+  const controller = new AbortController();
   ({
     response,
     attempt: retryCount,
@@ -1212,8 +1213,15 @@ export async function recursiveAfterRequestHookHandler(
     retry?.attempts || 0,
     retry?.onStatusCodes || [],
     requestTimeout || null,
-    requestHandler
+    requestHandler,
+    controller
   ));
+
+  c.req.raw.signal.addEventListener('abort', () => {
+    setTimeout(() => {
+      controller.abort();
+    }, 100);
+  });
 
   const {
     response: mappedResponse,
@@ -1271,7 +1279,7 @@ export async function recursiveAfterRequestHookHandler(
     mappedResponse: arhResponse,
     retryCount: lastAttempt,
     createdAt,
-    originalResponseJson,
+    originalResponseJson
   };
 }
 
