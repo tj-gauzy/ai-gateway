@@ -1291,10 +1291,10 @@ export async function recursiveAfterRequestHookHandler(
   ));
 
   c.req.raw.signal.addEventListener('abort', () => {
-    setTimeout(() => {
-      controller.abort();
-    }, 100);
-  });
+    if (!controller.signal.aborted) {
+      setTimeout(() => controller.abort(), 200);
+    }
+  }, { once: true });
 
   const {
     response: mappedResponse,

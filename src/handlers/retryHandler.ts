@@ -108,7 +108,7 @@ export const retryRequest = async (
                 response = new Response(JSON.stringify({
                     error: {
                       message: `Request Aborted by user`,
-                      type: 'timeout_error',
+                      type: 'cancel_error',
                       param: null,
                       code: null,
                     },
@@ -117,7 +117,7 @@ export const retryRequest = async (
                     headers: {
                       'content-type': 'application/json',
                     },
-                    status: 408,
+                    status: 499,
                   });
               }
             }
