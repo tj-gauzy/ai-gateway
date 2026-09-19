@@ -234,6 +234,11 @@ app.post('/v1/prompts/*', requestValidator, (c) => {
 
 app.get('/v1/reference/models', modelsHandler);
 app.get('/v1/reference/providers', providersHandler);
+// OpenAI-compatible model discovery endpoint.  Keep this before the generic
+// /v1 proxy route so clients using `GET /v1/models` do not get forwarded to a
+// provider.  The handler merges the built-in Portkey catalogue with models
+// configured by the ReaderNote server at runtime.
+app.get('/v1/models', modelsHandler);
 
 // WebSocket route
 if (runtime === 'workerd') {

@@ -752,7 +752,10 @@ export async function tryTargetsRecursively(
           `${currentJsonPath}.targets[${index}]`,
           currentInheritedConfig
         );
-        if (response?.headers.get('x-portkey-gateway-exception') === 'true') {
+        if (
+          response?.headers.get('x-portkey-gateway-exception') === 'true' &&
+          currentTarget.strategy?.allowExceptionFallback !== true
+        ) {
           break;
         }
         if (
@@ -774,6 +777,27 @@ export async function tryTargetsRecursively(
         (sum: number, provider: any) => sum + provider.weight,
         0
       );
+
+      // A route with every provider drained should fail explicitly instead
+      // of returning an undefined response (which used to surface as a
+      // gateway 500 with no useful explanation).
+      if (totalWeight <= 0) {
+        response = new Response(
+          JSON.stringify({
+            error: {
+              message: 'All providers in this model route are disabled',
+              type: 'no_available_provider',
+              param: null,
+              code: null,
+            },
+          }),
+          {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          }
+        );
+        break;
+      }
 
       let randomWeight = Math.random() * totalWeight;
       for (const [index, provider] of currentTarget.targets.entries()) {
@@ -1276,6 +1300,19 @@ export async function recursiveAfterRequestHookHandler(
   }
 
   const controller = new AbortController();
+  // Propagate the caller's cancellation before starting the upstream fetch.
+  // The previous implementation installed this listener only after
+  // retryRequest resolved, so a user abort while waiting for headers could
+  // not interrupt the provider request.  Keeping the listener attached also
+  // allows a client to stop an in-flight streaming response.
+  const abortUpstream = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  if (c.req.raw.signal.aborted) {
+    abortUpstream();
+  } else {
+    c.req.raw.signal.addEventListener('abort', abortUpstream, { once: true });
+  }
   ({
     response,
     attempt: retryCount,
@@ -1289,12 +1326,6 @@ export async function recursiveAfterRequestHookHandler(
     requestHandler,
     controller
   ));
-
-  c.req.raw.signal.addEventListener('abort', () => {
-    if (!controller.signal.aborted) {
-      setTimeout(() => controller.abort(), 200);
-    }
-  }, { once: true });
 
   const {
     response: mappedResponse,

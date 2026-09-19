@@ -4,6 +4,7 @@ import {
   tryTargetsRecursively,
 } from './handlerUtils';
 import { Context } from 'hono';
+import { applyModelRoute } from '../runtimeConfig';
 
 /**
  * Handles the '/completions' API request by selecting the appropriate provider(s) and making the request to them.
@@ -17,7 +18,10 @@ export async function completionsHandler(c: Context): Promise<Response> {
   try {
     let request = await c.req.json();
     let requestHeaders = Object.fromEntries(c.req.raw.headers);
-    const camelCaseConfig = constructConfigFromRequestHeaders(requestHeaders);
+    const camelCaseConfig = applyModelRoute(
+      constructConfigFromRequestHeaders(requestHeaders),
+      request?.model || requestHeaders['x-llm-model']
+    );
 
     const tryTargetsResponse = await tryTargetsRecursively(
       c,

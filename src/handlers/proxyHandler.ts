@@ -5,6 +5,7 @@ import {
   tryTargetsRecursively,
 } from './handlerUtils';
 import { RouterError } from '../errors/RouterError';
+import { applyModelRoute } from '../runtimeConfig';
 
 async function getRequestData(request: Request, contentType: string) {
   let finalRequest: any;
@@ -30,7 +31,10 @@ export async function proxyHandler(c: Context): Promise<Response> {
 
     const request = await getRequestData(c.req.raw, requestContentType);
 
-    const camelCaseConfig = constructConfigFromRequestHeaders(requestHeaders);
+    const camelCaseConfig = applyModelRoute(
+      constructConfigFromRequestHeaders(requestHeaders),
+      request?.model || requestHeaders['x-llm-model']
+    );
 
     const tryTargetsResponse = await tryTargetsRecursively(
       c,

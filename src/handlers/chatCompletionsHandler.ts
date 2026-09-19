@@ -4,6 +4,7 @@ import {
   tryTargetsRecursively,
 } from './handlerUtils';
 import { Context } from 'hono';
+import { applyModelRoute } from '../runtimeConfig';
 
 /**
  * Handles the '/chat/completions' API request by selecting the appropriate provider(s) and making the request to them.
@@ -17,7 +18,13 @@ export async function chatCompletionsHandler(c: Context): Promise<Response> {
   try {
     let request = await c.req.json();
     let requestHeaders = Object.fromEntries(c.req.raw.headers);
-    const camelCaseConfig = constructConfigFromRequestHeaders(requestHeaders);
+    // Resolve deployment aliases (for example "lite", "flash", and "pro") after
+    // parsing the body.  This lets one authenticated gateway expose several
+    // model policies while preserving the legacy x-portkey-config header.
+    const camelCaseConfig = applyModelRoute(
+      constructConfigFromRequestHeaders(requestHeaders),
+      request?.model || requestHeaders['x-llm-model']
+    );
     const tryTargetsResponse = await tryTargetsRecursively(
       c,
       camelCaseConfig ?? {},
