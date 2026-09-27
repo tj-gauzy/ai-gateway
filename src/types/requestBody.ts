@@ -281,6 +281,7 @@ export interface Message {
   function_call?: any;
   tool_calls?: any;
   tool_call_id?: string;
+  reasoning_content?: string;
   citationMetadata?: CitationMetadata;
 }
 
@@ -376,6 +377,15 @@ export interface Params {
   top_k?: number;
   tools?: Tool[];
   tool_choice?: ToolChoice;
+  /** OpenAI reasoning controls (also used by compatible DeepSeek/Qwen/GLM endpoints). */
+  reasoning_effort?: string;
+  thinking?: { type?: 'enabled' | 'disabled'; clear_thinking?: boolean };
+  enable_thinking?: boolean;
+  thinking_budget?: number;
+  preserve_thinking?: boolean;
+  clear_thinking?: boolean;
+  /** Legacy Python SDK wrapper accepted by older clients. */
+  extra_body?: Record<string, any>;
   response_format?: {
     type: 'json_object' | 'text' | 'json_schema';
     json_schema?: any;

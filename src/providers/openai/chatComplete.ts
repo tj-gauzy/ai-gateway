@@ -118,6 +118,21 @@ export const OpenAIChatCompleteConfig: ProviderConfig = {
   reasoning_effort: {
     param: 'reasoning_effort',
   },
+  thinking: {
+    param: 'thinking',
+  },
+  enable_thinking: {
+    param: 'enable_thinking',
+  },
+  thinking_budget: {
+    param: 'thinking_budget',
+  },
+  preserve_thinking: {
+    param: 'preserve_thinking',
+  },
+  clear_thinking: {
+    param: 'clear_thinking',
+  },
 };
 
 export interface OpenAIChatCompleteResponse extends ChatCompletionResponse {

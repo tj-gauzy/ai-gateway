@@ -79,6 +79,18 @@ export const DeepSeekChatCompleteConfig: ProviderConfig = {
     min: 0,
     max: 20,
   },
+  thinking: {
+    param: 'thinking',
+  },
+  enable_thinking: {
+    param: 'enable_thinking',
+  },
+  thinking_budget: {
+    param: 'thinking_budget',
+  },
+  reasoning_effort: {
+    param: 'reasoning_effort',
+  },
 };
 
 interface DeepSeekChatCompleteResponse extends ChatCompletionResponse {

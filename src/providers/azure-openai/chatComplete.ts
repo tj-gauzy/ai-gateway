@@ -108,6 +108,21 @@ export const AzureOpenAIChatCompleteConfig: ProviderConfig = {
   reasoning_effort: {
     param: 'reasoning_effort',
   },
+  thinking: {
+    param: 'thinking',
+  },
+  enable_thinking: {
+    param: 'enable_thinking',
+  },
+  thinking_budget: {
+    param: 'thinking_budget',
+  },
+  preserve_thinking: {
+    param: 'preserve_thinking',
+  },
+  clear_thinking: {
+    param: 'clear_thinking',
+  },
   stream_options: {
     param: 'stream_options',
   },

@@ -70,6 +70,49 @@ export const transformUsingProviderConfig = (
   providerOptions?: Options
 ) => {
   const transformedRequest: { [key: string]: any } = {};
+  // Older browser clients used the Python SDK's `extra_body` wrapper. The JS
+  // SDK sends that wrapper literally, so normalize known reasoning fields to
+  // top-level params before applying provider mappings while preserving
+  // compatibility with existing clients.
+  const normalizedParams: Params = { ...params };
+  if (params.extra_body && typeof params.extra_body === 'object') {
+    for (const key of [
+      'reasoning_effort',
+      'thinking',
+      'enable_thinking',
+      'thinking_budget',
+      'preserve_thinking',
+      'clear_thinking'
+    ]) {
+      if (!(key in normalizedParams) && key in params.extra_body) {
+        (normalizedParams as any)[key] = params.extra_body[key];
+      }
+    }
+  }
+  // Cloud clients use the stable OpenAI `reasoning_effort` contract. Convert
+  // it at the gateway boundary for routed vendor models so a route can point
+  // to Qwen/DeepSeek/GLM without making the browser know its backend dialect.
+  const model = String(normalizedParams.model || '').toLowerCase();
+  const effort = normalizedParams.reasoning_effort;
+  if (effort !== undefined && /qwen|qwq/.test(model) && normalizedParams.enable_thinking === undefined) {
+    if (effort === 'none') {
+      normalizedParams.enable_thinking = false;
+    } else {
+      normalizedParams.enable_thinking = true;
+      normalizedParams.thinking_budget = ({low: 1024, medium: 4096, high: 16384, xhigh: 32768, max: 32768} as Record<string, number>)[effort] || 4096;
+    }
+    delete normalizedParams.reasoning_effort;
+  } else if (effort !== undefined && /deepseek/.test(model) && normalizedParams.thinking === undefined) {
+    normalizedParams.thinking = {type: effort === 'none' ? 'disabled' : 'enabled'};
+    if (!/deepseek-v4/.test(model)) delete normalizedParams.reasoning_effort;
+    else if (effort === 'medium') normalizedParams.reasoning_effort = 'high';
+    else if (effort === 'xhigh') normalizedParams.reasoning_effort = 'max';
+  } else if (effort !== undefined && /glm/.test(model) && normalizedParams.thinking === undefined) {
+    normalizedParams.thinking = {type: effort === 'none' ? 'disabled' : 'enabled'};
+    if (!/glm-5\.[23]/.test(model)) delete normalizedParams.reasoning_effort;
+    else if (effort === 'medium') normalizedParams.reasoning_effort = 'high';
+    else if (effort === 'xhigh') normalizedParams.reasoning_effort = 'max';
+  }
 
   // For each parameter in the provider's configuration
   for (const configParam in providerConfig) {
@@ -81,9 +124,9 @@ export const transformUsingProviderConfig = (
 
     for (const paramConfig of paramConfigs) {
       // If the parameter is present in the incoming request body
-      if (configParam in params) {
+      if (configParam in normalizedParams) {
         // Get the value for this parameter
-        const value = getValue(configParam, params, paramConfig);
+        const value = getValue(configParam, normalizedParams, paramConfig);
 
         // Set the transformed parameter to the validated value
         setNestedProperty(
