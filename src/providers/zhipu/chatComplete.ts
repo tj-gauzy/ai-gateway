@@ -31,6 +31,10 @@ export const ZhipuChatCompleteConfig: ProviderConfig = {
     default: 100,
     min: 0,
   },
+  max_completion_tokens: {
+    param: 'max_tokens',
+    min: 0,
+  },
   temperature: {
     param: 'temperature',
     default: 1,
@@ -74,6 +78,7 @@ interface ZhipuStreamChunk {
   object: string;
   created: number;
   model: string;
+  usage?: ZhipuChatCompleteResponse['usage'];
   choices: {
     delta: {
       role?: string | null;
@@ -109,10 +114,7 @@ export const ZhipuChatCompleteResponseTransform: (
       provider: ZHIPU,
       choices: response.choices.map((c) => ({
         index: c.index,
-        message: {
-          role: c.message.role,
-          content: c.message.content,
-        },
+        message: { ...c.message },
         finish_reason: c.finish_reason,
       })),
       usage: {
@@ -143,13 +145,13 @@ export const ZhipuChatCompleteStreamChunkTransform: (
       created: parsedChunk.created,
       model: parsedChunk.model,
       provider: ZHIPU,
-      choices: [
-        {
-          index: parsedChunk.choices[0].index,
-          delta: parsedChunk.choices[0].delta,
-          finish_reason: parsedChunk.choices[0].finish_reason,
-        },
-      ],
+      // Usage can arrive in the final chunk, including one with no choices.
+      choices: (parsedChunk.choices || []).map((choice) => ({
+        index: choice.index,
+        delta: choice.delta,
+        finish_reason: choice.finish_reason,
+      })),
+      usage: parsedChunk.usage,
     })}` + '\n\n'
   );
 };

@@ -122,6 +122,11 @@ export class ResponseService {
     if (this.context.provider && this.context.provider !== POWERED_BY) {
       response.headers.append(HEADER_KEYS.PROVIDER, this.context.provider);
     }
+    if (this.context.honoContext.get('readerNoteRequest') === true) {
+      const option = this.context.providerOption as any;
+      if (option.readerNoteRouteId) response.headers.set('x-reader-note-route-id', String(option.readerNoteRouteId));
+      if (this.context.params.model) response.headers.set('x-reader-note-upstream-model', String(this.context.params.model));
+    }
 
     // Remove headers directly
     if (getRuntimeKey() == 'node') {

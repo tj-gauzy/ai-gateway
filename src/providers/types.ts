@@ -136,6 +136,7 @@ export type RequestHandler<
   requestURL: string;
   requestHeaders: Record<string, string>;
   requestBody: T;
+  signal?: AbortSignal;
 }) => Promise<Response>;
 
 export type RequestHandlers = Partial<

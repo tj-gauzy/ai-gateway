@@ -53,14 +53,19 @@ export class RequestContext {
   }
 
   get params(): Params {
-    const params: Params = this._params ?? (this.requestBody instanceof ReadableStream ||
+    let params: Params = this._params ?? (this.requestBody instanceof ReadableStream ||
       this.requestBody instanceof FormData ||
       !this.requestBody
       ? {}
       : { ...this.requestBody, ...this.overrideParams });
-    return this.honoContext.get('readerNoteRequest') === true && this.endpoint === 'chatComplete'
-      ? normalizeReaderNoteReasoning(params, this.providerOption)
-      : params;
+    if (this.honoContext.get('readerNoteRequest') === true && this.endpoint === 'chatComplete') {
+      params = normalizeReaderNoteReasoning(params, this.providerOption);
+    }
+    if (this.honoContext.get('readerNoteRequest') === true && ['chatComplete', 'complete'].includes(this.endpoint) &&
+      params.stream === true && ['openai', 'azure-openai', 'deepseek'].includes(this.providerOption.provider)) {
+      (params as any).stream_options = {...((params as any).stream_options || {}), include_usage: true};
+    }
+    return params;
   }
 
   set params(params: Params) {

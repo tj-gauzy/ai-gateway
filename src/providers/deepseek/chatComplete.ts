@@ -59,6 +59,9 @@ export const DeepSeekChatCompleteConfig: ProviderConfig = {
     param: 'stream',
     default: false,
   },
+  stream_options: {
+    param: 'stream_options',
+  },
   frequency_penalty: {
     param: 'frequency_penalty',
     default: 0,
@@ -159,10 +162,7 @@ export const DeepSeekChatCompleteResponseTransform: (
       provider: DEEPSEEK,
       choices: response.choices.map((c) => ({
         index: c.index,
-        message: {
-          role: c.message.role,
-          content: c.message.content,
-        },
+        message: { ...c.message },
         finish_reason: transformFinishReason(
           c.finish_reason as DEEPSEEK_STOP_REASON,
           strictOpenAiCompliance
@@ -199,12 +199,6 @@ export const DeepSeekChatCompleteStreamChunkTransform: (
     return `data: ${chunk}\n\n`;
   }
   const parsedChunk: DeepSeekStreamChunk = JSON.parse(chunk);
-  const finishReason = parsedChunk.choices[0].finish_reason
-    ? transformFinishReason(
-        parsedChunk.choices[0].finish_reason as DEEPSEEK_STOP_REASON,
-        strictOpenAiCompliance
-      )
-    : null;
   return (
     `data: ${JSON.stringify({
       id: parsedChunk.id,
@@ -212,13 +206,14 @@ export const DeepSeekChatCompleteStreamChunkTransform: (
       created: parsedChunk.created,
       model: parsedChunk.model,
       provider: DEEPSEEK,
-      choices: [
-        {
-          index: parsedChunk.choices[0].index,
-          delta: parsedChunk.choices[0].delta,
-          finish_reason: finishReason,
-        },
-      ],
+      // include_usage sends a terminal chunk with choices: [].
+      choices: (parsedChunk.choices || []).map((choice) => ({
+        index: choice.index,
+        delta: choice.delta,
+        finish_reason: choice.finish_reason
+          ? transformFinishReason(choice.finish_reason as DEEPSEEK_STOP_REASON, strictOpenAiCompliance)
+          : null,
+      })),
       usage: parsedChunk.usage,
     })}` + '\n\n'
   );

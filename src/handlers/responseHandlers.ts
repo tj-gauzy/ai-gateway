@@ -19,7 +19,6 @@ import { env } from 'hono/adapter';
 import { OpenAIModelResponseJSONToStreamGenerator } from '../providers/open-ai-base/createModelResponse';
 import { anthropicMessagesJsonToStreamGenerator } from '../providers/anthropic-base/utils/streamGenerator';
 import { endpointStrings } from '../providers/types';
-
 /**
  * Handles various types of responses based on the specified parameters
  * and returns a mapped response
@@ -114,17 +113,18 @@ export async function responseHandler(
       );
       return { response: streamingResponse, responseJson: null };
     }
+    const streamingResponse = handleStreamingMode(
+      response,
+      provider,
+      responseTransformerFunction,
+      requestURL,
+      strictOpenAiCompliance,
+      gatewayRequest,
+      responseTransformer as endpointStrings,
+      hooksResult
+    );
     return {
-      response: handleStreamingMode(
-        response,
-        provider,
-        responseTransformerFunction,
-        requestURL,
-        strictOpenAiCompliance,
-        gatewayRequest,
-        responseTransformer as endpointStrings,
-        hooksResult
-      ),
+      response: streamingResponse,
       responseJson: null,
     };
   }

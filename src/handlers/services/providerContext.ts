@@ -116,19 +116,20 @@ export class ProviderContext {
 
   getRequestHandler(
     context: RequestContext
-  ): (() => Promise<Response>) | undefined {
+  ): ((signal?: AbortSignal) => Promise<Response>) | undefined {
     const requestHandler = this.requestHandlers?.[context.endpoint];
     if (!requestHandler) {
       return undefined;
     }
 
-    return () =>
+    return (signal) =>
       requestHandler({
         c: context.honoContext,
         providerOptions: context.providerOption,
         requestURL: context.honoContext.req.url,
         requestHeaders: context.requestHeaders,
         requestBody: context.requestBody,
+        signal,
       });
   }
 }

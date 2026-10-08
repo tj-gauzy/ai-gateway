@@ -318,6 +318,9 @@ export function handleStreamingMode(
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const reader = response.body.getReader();
+  // Cancelling the downstream reader rejects writer.closed. Propagate that
+  // cancellation immediately even while the producer is awaiting upstream.
+  void writer.closed.catch((reason) => reader.cancel(reason).catch(() => {}));
   const isSleepTimeRequired = proxyProvider === AZURE_OPEN_AI ? true : false;
   const encoder = new TextEncoder();
 
@@ -341,7 +344,10 @@ export function handleStreamingMode(
         }
       } catch (error) {
         console.error('Error during stream processing:', proxyProvider, error);
+        await writer.abort(error).catch(() => {});
       } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
         try {
           await writer.close();
         } catch (closeError) {
@@ -375,7 +381,10 @@ export function handleStreamingMode(
         }
       } catch (error) {
         console.error('Error during stream processing:', proxyProvider, error);
+        await writer.abort(error).catch(() => {});
       } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
         try {
           await writer.close();
         } catch (closeError) {

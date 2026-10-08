@@ -21,7 +21,7 @@ export async function completionsHandler(c: Context): Promise<Response> {
     const camelCaseConfig = applyModelRoute(
       constructConfigFromRequestHeaders(requestHeaders),
       request?.model || requestHeaders['x-llm-model'],
-      c.get('readerNoteRequest') === true
+      c.get('readerNoteRequest') === true && c.get('readerNoteAbortSignal') === undefined
     );
 
     const tryTargetsResponse = await tryTargetsRecursively(

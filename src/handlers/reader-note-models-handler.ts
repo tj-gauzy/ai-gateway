@@ -13,10 +13,6 @@ export async function readerNoteModelsHandler(
     return next();
   }
   const models = getRuntimeModels();
-  if (!models.length) return next();
-  const provider = context.req.query('provider');
-  const data = provider
-    ? models.filter((model) => model.provider?.id === provider || model.providers?.includes(provider))
-    : models;
+  const data = models;
   return context.json({ object: 'list', data, count: data.length });
 }

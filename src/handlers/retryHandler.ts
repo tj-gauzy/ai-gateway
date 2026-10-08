@@ -25,7 +25,7 @@ async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeout: number,
-  requestHandler?: () => Promise<Response>
+  requestHandler?: (signal?: AbortSignal) => Promise<Response>
 ): Promise<Response> {
   // A timeout belongs to this attempt; it must not abort later retries.
   const controller = new AbortController();
@@ -48,7 +48,7 @@ async function fetchWithTimeout(
 
   try {
     if (requestHandler) {
-      response = await requestHandler();
+      response = await requestHandler(controller.signal);
     } else {
       response = await fetch(url, timeoutRequestOptions);
     }
@@ -90,7 +90,7 @@ export const retryRequest = async (
   retryCount: number,
   statusCodesToRetry: number[],
   timeout: number | null,
-  requestHandler?: () => Promise<Response>,
+  requestHandler?: (signal?: AbortSignal) => Promise<Response>,
   followProviderRetry?: boolean
 ): Promise<{
   response: Response;
@@ -123,7 +123,7 @@ export const retryRequest = async (
               requestHandler
             );
           } else if (requestHandler) {
-            response = await requestHandler();
+            response = await requestHandler(signal || undefined);
           } else {
             try {
               response = await fetch(url, options);

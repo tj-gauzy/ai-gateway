@@ -121,6 +121,7 @@ function routeFromValue(id: string, value: any, defaults: Record<string, any> = 
  */
 export function getConfiguredModelRoutes(config: Record<string, any> = runtimeConfig): RuntimeModelRoute[] {
   const source = config || {};
+  if (Array.isArray(source.LLM_REGISTRY_ROUTES)) return source.LLM_REGISTRY_ROUTES;
   const raw = parseJson(
     source.LLM_MODEL_ROUTES ||
       source.LLM_MODELS_CONFIG ||
@@ -252,6 +253,10 @@ export function applyModelRoute(
   );
 
   const targets = route.targets.map((target) => {
+    if (target.targets) return {
+      ...target,
+      overrideParams: {...target.overrideParams, ...(Number.isFinite(inheritedMax) ? {max_completion_tokens: inheritedMax} : {})},
+    };
     const { model: targetModel, overrideParams, ...rest } = target;
     const routeMax = Number(
       overrideParams?.maxCompletionTokens ?? overrideParams?.max_completion_tokens
@@ -297,12 +302,22 @@ function modelRecord(id: string, route?: RuntimeModelRoute) {
     owned_by: 'reader-note',
     ...(providers?.length ? { provider: { id: providers[0] } } : {}),
     ...(providers?.length ? { providers } : {}),
+    ...(route && (route.inputRate !== undefined || route.outputRate !== undefined)
+      ? {credit: {input_rate: Number(route.inputRate ?? 1), output_rate: Number(route.outputRate ?? 1)}}
+      : {}),
   };
 }
 
 /** Build an OpenAI-compatible response while retaining the gateway's static catalogue. */
 export function getRuntimeModels(config = runtimeConfig) {
   const routes = getConfiguredModelRoutes(config);
+  if (Array.isArray(config.LLM_REGISTRY_ROUTES)) {
+    return routes.map((route) => ({
+      id: route.id, object: 'model', name: route.label || route.id, owned_by: 'reader-note',
+      credit: {input_rate: Number(route.inputRate ?? 1), output_rate: Number(route.outputRate ?? 1)},
+      ...(route.capabilities ? {capabilities: route.capabilities} : {})
+    }));
+  }
   const dynamic = routes.map((route) => modelRecord(route.id, route));
   const legacyModels = csv(config.LLM_MODEL || environmentValue('LLM_MODEL')).map((id) => modelRecord(id));
   const unique = new Map<string, any>();

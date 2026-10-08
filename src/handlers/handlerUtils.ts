@@ -683,7 +683,7 @@ export async function tryTargetsRecursively(
           (!codes && response?.ok) ||
           // Gateway exceptions stop fallback, as in the upstream router.
           gatewayException ||
-          c.req.raw.signal.aborted
+          (c.get('readerNoteAbortSignal') || c.req.raw.signal).aborted
         ) {
           // Skip the fallback
           break;
@@ -1231,7 +1231,7 @@ export async function recursiveAfterRequestHookHandler(
   const requestHandler = providerContext.getRequestHandler(requestContext);
   const url = requestContext.requestURL;
 
-  options.signal = c.req.raw.signal;
+  options.signal = c.get('readerNoteAbortSignal') || c.req.raw.signal;
   ({
     response,
     attempt: retryCount,
