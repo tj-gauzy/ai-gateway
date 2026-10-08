@@ -1,10 +1,17 @@
-import { BEDROCK, documentMimeTypes, imagesMimeTypes } from '../../globals';
+import {
+  BEDROCK,
+  fileExtensionMimeTypeMap,
+  imagesMimeTypes,
+  videoMimeTypes,
+} from '../../globals';
 import {
   Message,
   Params,
   ToolCall,
   SYSTEM_MESSAGE_ROLES,
   ContentType,
+  ToolChoiceObject,
+  Options,
 } from '../../types/requestBody';
 import {
   ChatCompletionResponse,
@@ -15,6 +22,7 @@ import {
 import {
   generateErrorResponse,
   generateInvalidProviderResponseError,
+  transformFinishReason,
 } from '../utils';
 import {
   BedrockAI21CompleteResponse,
@@ -23,6 +31,13 @@ import {
 } from './complete';
 import { BedrockErrorResponse } from './embed';
 import {
+  BedrockChatCompleteStreamChunk,
+  BedrockChatCompletionResponse,
+  BedrockContentItem,
+  BedrockStreamState,
+} from './types';
+import {
+  getBedrockErrorChunk,
   transformAdditionalModelRequestFields,
   transformAI21AdditionalModelRequestFields,
   transformAnthropicAdditionalModelRequestFields,
@@ -32,8 +47,14 @@ import {
 
 export interface BedrockChatCompletionsParams extends Params {
   additionalModelRequestFields?: Record<string, any>;
+  additional_model_request_fields?: Record<string, any>;
   additionalModelResponseFieldPaths?: string[];
   guardrailConfig?: {
+    guardrailIdentifier: string;
+    guardrailVersion: string;
+    trace?: string;
+  };
+  guardrail_config?: {
     guardrailIdentifier: string;
     guardrailVersion: string;
     trace?: string;
@@ -43,13 +64,14 @@ export interface BedrockChatCompletionsParams extends Params {
 }
 
 export interface BedrockConverseAnthropicChatCompletionsParams
-  extends BedrockChatCompletionsParams {
+  extends Omit<BedrockChatCompletionsParams, 'anthropic_beta'> {
   anthropic_version?: string;
   user?: string;
   thinking?: {
     type: string;
     budget_tokens: number;
   };
+  anthropic_beta?: string | string[];
 }
 
 export interface BedrockConverseCohereChatCompletionsParams
@@ -69,15 +91,30 @@ export interface BedrockConverseAI21ChatCompletionsParams
   countPenalty?: number;
 }
 
-const getMessageTextContentArray = (message: Message): { text: string }[] => {
+const getMessageTextContentArray = (
+  message: Message
+): Array<{ text: string } | { cachePoint: { type: string } }> => {
   if (message.content && typeof message.content === 'object') {
-    return message.content
-      .filter((item) => item.type === 'text')
-      .map((item) => {
-        return {
-          text: item.text || '',
-        };
+    const filteredContentMessages = message.content.filter(
+      (item) => item.type === 'text'
+    );
+    const finalContent: Array<
+      { text: string } | { cachePoint: { type: string } }
+    > = [];
+    filteredContentMessages.forEach((item) => {
+      finalContent.push({
+        text: item.text || '',
       });
+      // push a cache point.
+      if (item.cache_control) {
+        finalContent.push({
+          cachePoint: {
+            type: 'default',
+          },
+        });
+      }
+    });
+    return finalContent;
   }
   return [
     {
@@ -109,12 +146,17 @@ const transformAndAppendThinkingMessageItem = (
 };
 
 const getMessageContent = (message: Message) => {
-  if (!message.content && !message.tool_calls) return [];
+  if (!message.content && !message.tool_calls && !message.tool_call_id)
+    return [];
   if (message.role === 'tool') {
+    const toolResultContent = getMessageTextContentArray(message);
     return [
       {
         toolResult: {
-          content: getMessageTextContentArray(message),
+          ...(toolResultContent.length &&
+          (toolResultContent[0] as { text: string })?.text
+            ? { content: toolResultContent }
+            : { content: [] }), // Bedrock allows empty array but does not allow empty string in content.
           toolUseId: message.tool_call_id,
         },
       },
@@ -124,11 +166,11 @@ const getMessageContent = (message: Message) => {
   const inputContent: ContentType[] | string | undefined =
     message.content_blocks ?? message.content;
   // if message is a string, return a single element array with the text
-  if (typeof inputContent === 'string') {
+  if (typeof inputContent === 'string' && inputContent.trim()) {
     out.push({
       text: inputContent,
     });
-  } else if (inputContent) {
+  } else if (inputContent && Array.isArray(inputContent)) {
     inputContent.forEach((item) => {
       if (item.type === 'text') {
         out.push({
@@ -150,7 +192,16 @@ const getMessageContent = (message: Message) => {
               format: fileFormat,
             },
           });
-        } else if (documentMimeTypes.includes(mimeType)) {
+        } else if (videoMimeTypes.includes(mimeType)) {
+          out.push({
+            video: {
+              format: fileFormat,
+              source: {
+                bytes,
+              },
+            },
+          });
+        } else {
           out.push({
             document: {
               format: fileFormat,
@@ -161,6 +212,62 @@ const getMessageContent = (message: Message) => {
             },
           });
         }
+      } else if (item.type === 'file') {
+        const mimeType = item.file?.mime_type || fileExtensionMimeTypeMap.pdf;
+        const fileFormat = mimeType.split('/')[1];
+        if (imagesMimeTypes.includes(mimeType)) {
+          out.push({
+            image: {
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
+              },
+              format: fileFormat,
+            },
+          });
+        } else if (videoMimeTypes.includes(mimeType)) {
+          out.push({
+            video: {
+              format: fileFormat,
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
+              },
+            },
+          });
+        } else {
+          out.push({
+            document: {
+              format: fileFormat,
+              name: item.file?.file_name || crypto.randomUUID(),
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
+              },
+            },
+          });
+        }
+      }
+
+      if (item.cache_control) {
+        // if content item has `cache_control`, push the cache point to the out array
+        out.push({
+          cachePoint: {
+            type: 'default',
+          },
+        });
       }
     });
   }
@@ -218,8 +325,13 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
       required: false,
       transform: (params: BedrockChatCompletionsParams) => {
         if (!params.messages) return;
-        const systemMessages = params.messages.reduce(
-          (acc: { text: string }[], msg) => {
+        const systemMessages: Array<
+          { text: string } | { cachePoint: { type: string } }
+        > = params.messages.reduce(
+          (
+            acc: Array<{ text: string } | { cachePoint: { type: string } }>,
+            msg
+          ) => {
             if (SYSTEM_MESSAGE_ROLES.includes(msg.role))
               return acc.concat(...getMessageTextContentArray(msg));
             return acc;
@@ -234,24 +346,38 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
   tools: {
     param: 'toolConfig',
     transform: (params: BedrockChatCompletionsParams) => {
-      const toolConfig = {
-        tools: params.tools?.map((tool) => {
-          if (!tool.function) return;
-          return {
+      const canBeAmazonModel = params.model?.includes('amazon');
+      const tools: Array<
+        | { toolSpec: { name: string; description?: string; inputSchema: any } }
+        | { cachePoint: { type: string } }
+      > = [];
+      params.tools?.forEach((tool) => {
+        if (tool.function) {
+          tools.push({
             toolSpec: {
               name: tool.function.name,
               description: tool.function.description,
               inputSchema: { json: tool.function.parameters },
             },
-          };
-        }),
+          });
+        }
+        if (tool.cache_control && !canBeAmazonModel) {
+          tools.push({
+            cachePoint: {
+              type: 'default',
+            },
+          });
+        }
+      });
+      const toolConfig = {
+        tools,
       };
       let toolChoice = undefined;
       if (params.tool_choice) {
         if (typeof params.tool_choice === 'object') {
           toolChoice = {
             tool: {
-              name: params.tool_choice.function.name,
+              name: (params.tool_choice as ToolChoiceObject).function.name,
             },
           };
         } else if (typeof params.tool_choice === 'string') {
@@ -266,14 +392,23 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
           }
         }
       }
-      return { ...toolConfig, toolChoice };
+      // TODO: split this into two provider options, one for tools and one for toolChoice
+      return tools.length ? { ...toolConfig, toolChoice } : null;
     },
   },
   guardrailConfig: {
     param: 'guardrailConfig',
     required: false,
   },
+  guardrail_config: {
+    param: 'guardrailConfig',
+    required: false,
+  },
   additionalModelResponseFieldPaths: {
+    param: 'additionalModelResponseFieldPaths',
+    required: false,
+  },
+  additional_model_response_field_paths: {
     param: 'additionalModelResponseFieldPaths',
     required: false,
   },
@@ -307,59 +442,16 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
     transform: (params: BedrockChatCompletionsParams) =>
       transformAdditionalModelRequestFields(params),
   },
-  top_k: {
+  additional_model_request_fields: {
     param: 'additionalModelRequestFields',
     transform: (params: BedrockChatCompletionsParams) =>
       transformAdditionalModelRequestFields(params),
   },
+  performance_config: {
+    param: 'performanceConfig',
+    required: false,
+  },
 };
-
-type BedrockContentItem = {
-  text?: string;
-  toolUse?: {
-    toolUseId: string;
-    name: string;
-    input: object;
-  };
-  reasoningContent?: {
-    reasoningText?: {
-      signature: string;
-      text: string;
-    };
-    redactedContent?: string;
-  };
-  image?: {
-    source: {
-      bytes: string;
-    };
-    format: string;
-  };
-  document?: {
-    format: string;
-    name: string;
-    source: {
-      bytes: string;
-    };
-  };
-};
-
-interface BedrockChatCompletionResponse {
-  metrics: {
-    latencyMs: number;
-  };
-  output: {
-    message: {
-      role: string;
-      content: BedrockContentItem[];
-    };
-  };
-  stopReason: string;
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
-}
 
 export const BedrockErrorResponseTransform: (
   response: BedrockErrorResponse
@@ -402,12 +494,16 @@ export const BedrockChatCompleteResponseTransform: (
   response: BedrockChatCompletionResponse | BedrockErrorResponse,
   responseStatus: number,
   responseHeaders: Headers,
-  strictOpenAiCompliance: boolean
+  strictOpenAiCompliance: boolean,
+  _gatewayRequestUrl: string,
+  gatewayRequest: Params
 ) => ChatCompletionResponse | ErrorResponse = (
   response,
   responseStatus,
-  _responseHeaders,
-  strictOpenAiCompliance
+  responseHeaders,
+  strictOpenAiCompliance,
+  _gatewayRequestUrl,
+  gatewayRequest
 ) => {
   if (responseStatus !== 200) {
     const errorResponse = BedrockErrorResponseTransform(
@@ -426,11 +522,14 @@ export const BedrockChatCompleteResponseTransform: (
       ? transformContentBlocks(response.output.message.content)
       : undefined;
 
+    const cacheReadInputTokens = response.usage?.cacheReadInputTokens || 0;
+    const cacheWriteInputTokens = response.usage?.cacheWriteInputTokens || 0;
+
     const responseObj: ChatCompletionResponse = {
       id: Date.now().toString(),
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: '',
+      model: gatewayRequest.model || '',
       provider: BEDROCK,
       choices: [
         {
@@ -442,13 +541,27 @@ export const BedrockChatCompleteResponseTransform: (
               content_blocks: contentBlocks,
             }),
           },
-          finish_reason: response.stopReason,
+          finish_reason: transformFinishReason(
+            response.stopReason,
+            strictOpenAiCompliance
+          ),
         },
       ],
       usage: {
-        prompt_tokens: response.usage.inputTokens,
+        prompt_tokens:
+          response.usage.inputTokens +
+          cacheReadInputTokens +
+          cacheWriteInputTokens,
         completion_tokens: response.usage.outputTokens,
-        total_tokens: response.usage.totalTokens,
+        total_tokens: response.usage.totalTokens, // contains the cache usage as well
+        prompt_tokens_details: {
+          cached_tokens: cacheReadInputTokens,
+        },
+        // we only want to be sending this for anthropic models and this is not openai compliant
+        ...((cacheReadInputTokens > 0 || cacheWriteInputTokens > 0) && {
+          cache_read_input_tokens: cacheReadInputTokens,
+          cache_creation_input_tokens: cacheWriteInputTokens,
+        }),
       },
     };
     const toolCalls = response.output.message.content
@@ -469,57 +582,24 @@ export const BedrockChatCompleteResponseTransform: (
   return generateInvalidProviderResponseError(response, BEDROCK);
 };
 
-export interface BedrockChatCompleteStreamChunk {
-  contentBlockIndex?: number;
-  delta?: {
-    text: string;
-    toolUse: {
-      toolUseId: string;
-      name: string;
-      input: object;
-    };
-    reasoningContent?: {
-      text?: string;
-      signature?: string;
-      redactedContent?: string;
-    };
-  };
-  start?: {
-    toolUse: {
-      toolUseId: string;
-      name: string;
-      input?: object;
-    };
-  };
-  stopReason?: string;
-  metrics?: {
-    latencyMs: number;
-  };
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
-}
-
-interface BedrockStreamState {
-  stopReason?: string;
-  currentToolCallIndex?: number;
-}
-
 // refer: https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html
 export const BedrockChatCompleteStreamChunkTransform: (
   response: string,
   fallbackId: string,
   streamState: BedrockStreamState,
-  strictOpenAiCompliance: boolean
+  strictOpenAiCompliance: boolean,
+  gatewayRequest: Params
 ) => string | string[] = (
   responseChunk,
   fallbackId,
   streamState,
-  strictOpenAiCompliance
+  strictOpenAiCompliance,
+  gatewayRequest
 ) => {
   const parsedChunk: BedrockChatCompleteStreamChunk = JSON.parse(responseChunk);
+  if (parsedChunk.message) {
+    return getBedrockErrorChunk(fallbackId, gatewayRequest.model || '');
+  }
   if (parsedChunk.stopReason) {
     streamState.stopReason = parsedChunk.stopReason;
   }
@@ -528,24 +608,41 @@ export const BedrockChatCompleteStreamChunkTransform: (
   }
 
   if (parsedChunk.usage) {
+    const cacheReadInputTokens = parsedChunk.usage?.cacheReadInputTokens || 0;
+    const cacheWriteInputTokens = parsedChunk.usage?.cacheWriteInputTokens || 0;
+
     return [
       `data: ${JSON.stringify({
         id: fallbackId,
         object: 'chat.completion.chunk',
         created: Math.floor(Date.now() / 1000),
-        model: '',
+        model: gatewayRequest.model || '',
         provider: BEDROCK,
         choices: [
           {
             index: 0,
             delta: {},
-            finish_reason: streamState.stopReason,
+            finish_reason: transformFinishReason(
+              streamState.stopReason,
+              strictOpenAiCompliance
+            ),
           },
         ],
         usage: {
-          prompt_tokens: parsedChunk.usage.inputTokens,
+          prompt_tokens:
+            parsedChunk.usage.inputTokens +
+            cacheReadInputTokens +
+            cacheWriteInputTokens,
           completion_tokens: parsedChunk.usage.outputTokens,
           total_tokens: parsedChunk.usage.totalTokens,
+          prompt_tokens_details: {
+            cached_tokens: cacheReadInputTokens,
+          },
+          // we only want to be sending this for anthropic models and this is not openai compliant
+          ...((cacheReadInputTokens > 0 || cacheWriteInputTokens > 0) && {
+            cache_read_input_tokens: cacheReadInputTokens,
+            cache_creation_input_tokens: cacheWriteInputTokens,
+          }),
         },
       })}\n\n`,
       `data: [DONE]\n\n`,
@@ -597,7 +694,7 @@ export const BedrockChatCompleteStreamChunkTransform: (
     id: fallbackId,
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
-    model: '',
+    model: gatewayRequest.model || '',
     provider: BEDROCK,
     choices: [
       {
@@ -612,6 +709,7 @@ export const BedrockChatCompleteStreamChunkTransform: (
             }),
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         },
+        finish_reason: null,
       },
     ],
   })}\n\n`;
@@ -621,34 +719,70 @@ export const BedrockConverseAnthropicChatCompleteConfig: ProviderConfig = {
   ...BedrockConverseChatCompleteConfig,
   additionalModelRequestFields: {
     param: 'additionalModelRequestFields',
-    transform: (params: BedrockConverseAnthropicChatCompletionsParams) =>
-      transformAnthropicAdditionalModelRequestFields(params),
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
+  },
+  additional_model_request_fields: {
+    param: 'additionalModelRequestFields',
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
   top_k: {
     param: 'additionalModelRequestFields',
-    transform: (params: BedrockConverseAnthropicChatCompletionsParams) =>
-      transformAnthropicAdditionalModelRequestFields(params),
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
   anthropic_version: {
     param: 'additionalModelRequestFields',
-    transform: (params: BedrockConverseAnthropicChatCompletionsParams) =>
-      transformAnthropicAdditionalModelRequestFields(params),
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
   user: {
     param: 'additionalModelRequestFields',
-    transform: (params: BedrockConverseAnthropicChatCompletionsParams) =>
-      transformAnthropicAdditionalModelRequestFields(params),
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
   thinking: {
     param: 'additionalModelRequestFields',
-    transform: (params: BedrockConverseAnthropicChatCompletionsParams) =>
-      transformAnthropicAdditionalModelRequestFields(params),
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
+  },
+  anthropic_beta: {
+    param: 'additionalModelRequestFields',
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
 };
 
 export const BedrockConverseCohereChatCompleteConfig: ProviderConfig = {
   ...BedrockConverseChatCompleteConfig,
   additionalModelRequestFields: {
+    param: 'additionalModelRequestFields',
+    transform: (params: BedrockConverseCohereChatCompletionsParams) =>
+      transformCohereAdditionalModelRequestFields(params),
+  },
+  additional_model_request_fields: {
     param: 'additionalModelRequestFields',
     transform: (params: BedrockConverseCohereChatCompletionsParams) =>
       transformCohereAdditionalModelRequestFields(params),
@@ -683,6 +817,11 @@ export const BedrockConverseCohereChatCompleteConfig: ProviderConfig = {
 export const BedrockConverseAI21ChatCompleteConfig: ProviderConfig = {
   ...BedrockConverseChatCompleteConfig,
   additionalModelRequestFields: {
+    param: 'additionalModelRequestFields',
+    transform: (params: BedrockConverseAI21ChatCompletionsParams) =>
+      transformAI21AdditionalModelRequestFields(params),
+  },
+  additional_model_request_fields: {
     param: 'additionalModelRequestFields',
     transform: (params: BedrockConverseAI21ChatCompletionsParams) =>
       transformAI21AdditionalModelRequestFields(params),
@@ -725,7 +864,7 @@ export const BedrockCohereChatCompleteConfig: ProviderConfig = {
     required: true,
     transform: (params: Params) => {
       let prompt: string = '';
-      if (!!params.messages) {
+      if (params.messages) {
         let messages: Message[] = params.messages;
         messages.forEach((msg, index) => {
           if (index === 0 && SYSTEM_MESSAGE_ROLES.includes(msg.role)) {
@@ -802,11 +941,17 @@ export const BedrockCohereChatCompleteConfig: ProviderConfig = {
 export const BedrockCohereChatCompleteResponseTransform: (
   response: BedrockCohereCompleteResponse | BedrockErrorResponse,
   responseStatus: number,
-  responseHeaders: Headers
+  responseHeaders: Headers,
+  strictOpenAiCompliance: boolean,
+  gatewayRequestUrl: string,
+  gatewayRequest: Params
 ) => ChatCompletionResponse | ErrorResponse = (
   response,
   responseStatus,
-  responseHeaders
+  responseHeaders,
+  _strictOpenAiCompliance,
+  _gatewayRequestUrl,
+  gatewayRequest
 ) => {
   if (responseStatus !== 200) {
     const errorResposne = BedrockErrorResponseTransform(
@@ -814,6 +959,8 @@ export const BedrockCohereChatCompleteResponseTransform: (
     );
     if (errorResposne) return errorResposne;
   }
+
+  const model = gatewayRequest.model || '';
 
   if ('generations' in response) {
     const prompt_tokens =
@@ -824,7 +971,7 @@ export const BedrockCohereChatCompleteResponseTransform: (
       id: Date.now().toString(),
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: '',
+      model,
       provider: BEDROCK,
       choices: response.generations.map((generation, index) => ({
         index: index,
@@ -847,13 +994,23 @@ export const BedrockCohereChatCompleteResponseTransform: (
 
 export const BedrockCohereChatCompleteStreamChunkTransform: (
   response: string,
-  fallbackId: string
-) => string | string[] = (responseChunk, fallbackId) => {
+  fallbackId: string,
+  _streamState: Record<string, any>,
+  _strictOpenAiCompliance: boolean,
+  gatewayRequest: Params
+) => string | string[] = (
+  responseChunk,
+  fallbackId,
+  _streamState,
+  _strictOpenAiCompliance,
+  gatewayRequest
+) => {
   let chunk = responseChunk.trim();
   chunk = chunk.replace(/^data: /, '');
   chunk = chunk.trim();
   const parsedChunk: BedrockCohereStreamChunk = JSON.parse(chunk);
 
+  const model = gatewayRequest.model || '';
   // discard the last cohere chunk as it sends the whole response combined.
   if (parsedChunk.is_finished) {
     return [
@@ -861,7 +1018,7 @@ export const BedrockCohereChatCompleteStreamChunkTransform: (
         id: fallbackId,
         object: 'chat.completion.chunk',
         created: Math.floor(Date.now() / 1000),
-        model: '',
+        model,
         provider: BEDROCK,
         choices: [
           {
@@ -888,7 +1045,7 @@ export const BedrockCohereChatCompleteStreamChunkTransform: (
     id: fallbackId,
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
-    model: '',
+    model,
     provider: BEDROCK,
     choices: [
       {
@@ -909,7 +1066,7 @@ export const BedrockAI21ChatCompleteConfig: ProviderConfig = {
     required: true,
     transform: (params: Params) => {
       let prompt: string = '';
-      if (!!params.messages) {
+      if (params.messages) {
         let messages: Message[] = params.messages;
         messages.forEach((msg, index) => {
           if (index === 0 && SYSTEM_MESSAGE_ROLES.includes(msg.role)) {
@@ -978,11 +1135,17 @@ export const BedrockAI21ChatCompleteConfig: ProviderConfig = {
 export const BedrockAI21ChatCompleteResponseTransform: (
   response: BedrockAI21CompleteResponse | BedrockErrorResponse,
   responseStatus: number,
-  responseHeaders: Headers
+  responseHeaders: Headers,
+  strictOpenAiCompliance: boolean,
+  _gatewayRequestUrl: string,
+  gatewayRequest: Params
 ) => ChatCompletionResponse | ErrorResponse = (
   response,
   responseStatus,
-  responseHeaders
+  responseHeaders,
+  _strictOpenAiCompliance,
+  _gatewayRequestUrl,
+  gatewayRequest
 ) => {
   if (responseStatus !== 200) {
     const errorResposne = BedrockErrorResponseTransform(
@@ -1000,7 +1163,7 @@ export const BedrockAI21ChatCompleteResponseTransform: (
       id: response.id.toString(),
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: '',
+      model: gatewayRequest.model ?? '',
       provider: BEDROCK,
       choices: response.completions.map((completion, index) => ({
         index: index,

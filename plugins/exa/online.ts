@@ -4,7 +4,7 @@ import {
   PluginHandler,
   PluginParameters,
 } from '../types';
-import { getCurrentContentPart, setCurrentContentPart, post } from '../utils';
+import { getCurrentContentPart, post } from '../utils';
 
 const BASE_URL = 'https://api.exa.ai/search';
 
@@ -27,11 +27,13 @@ const performExaSearch = async (
   query: string,
   credentials: any,
   timeout?: number,
-  numResults: number = 10
+  numResults: number = 10,
+  includeDomains?: string[],
+  excludeDomains?: string[]
 ) => {
   if (!query.trim()) return { searchResults: null, data: null };
 
-  const searchBody = {
+  const searchBody: any = {
     query,
     numResults,
     useAutoprompt: true,
@@ -39,6 +41,15 @@ const performExaSearch = async (
       text: true,
     },
   };
+
+  // Add domain filters if provided
+  if (includeDomains && includeDomains.length > 0) {
+    searchBody.includeDomains = includeDomains;
+  }
+
+  if (excludeDomains && excludeDomains.length > 0) {
+    searchBody.excludeDomains = excludeDomains;
+  }
 
   const options = {
     headers: {
@@ -58,8 +69,6 @@ const performExaSearch = async (
     if (!result.results || result.results.length === 0) {
       return { searchResults: null, data: null };
     }
-
-    console.log(result.results);
 
     const formattedResults = result.results.map((item) => ({
       title: item.title,
@@ -99,47 +108,27 @@ const formatSearchResultsForPrompt = (
 
 const insertSearchResults = (
   context: PluginContext,
-  searchResults: string,
-  insertLocation: string
+  searchResults: string
 ): Record<string, any> => {
   const json = context.request.json;
   const updatedJson = { ...json };
 
   if (context.requestType === 'chatComplete') {
     const messages = [...json.messages];
+    const systemIndex = messages.findIndex((msg) => msg.role === 'system');
 
-    switch (insertLocation) {
-      case 'append_to_system': {
-        const systemIndex = messages.findIndex((msg) => msg.role === 'system');
-        if (systemIndex !== -1) {
-          messages[systemIndex] = {
-            ...messages[systemIndex],
-            content: messages[systemIndex].content + searchResults,
-          };
-        } else {
-          // If no system message exists, add one
-          messages.unshift({
-            role: 'system',
-            content: searchResults,
-          });
-        }
-        break;
-      }
-      case 'add_user_after_system': {
-        const systemIndex = messages.findIndex((msg) => msg.role === 'system');
-        const insertIndex = systemIndex !== -1 ? systemIndex + 1 : 0;
-        messages.splice(insertIndex, 0, {
-          role: 'user',
-          content: searchResults,
-        });
-        break;
-      }
-      case 'add_user_to_end':
-        messages.push({
-          role: 'user',
-          content: searchResults,
-        });
-        break;
+    if (systemIndex !== -1) {
+      // Append to existing system message
+      messages[systemIndex] = {
+        ...messages[systemIndex],
+        content: messages[systemIndex].content + searchResults,
+      };
+    } else {
+      // If no system message exists, add one
+      messages.unshift({
+        role: 'system',
+        content: searchResults,
+      });
     }
 
     updatedJson.messages = messages;
@@ -212,7 +201,9 @@ export const handler: PluginHandler = async (
       combinedQuery,
       parameters.credentials,
       parameters.timeout,
-      parameters.numResults || 10
+      parameters.numResults || 10,
+      parameters.includeDomains,
+      parameters.excludeDomains
     );
 
     // Store the search metadata including sources
@@ -234,12 +225,8 @@ export const handler: PluginHandler = async (
         parameters.suffix
       );
 
-      // Insert the search results based on the specified location
-      const newTransformedData = insertSearchResults(
-        context,
-        formattedResults,
-        parameters.insert_location || 'append_to_system'
-      );
+      // Insert the search results
+      const newTransformedData = insertSearchResults(context, formattedResults);
       Object.assign(transformedData, newTransformedData);
       transformed = true;
     }

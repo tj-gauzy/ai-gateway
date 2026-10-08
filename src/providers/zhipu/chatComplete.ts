@@ -47,15 +47,6 @@ export const ZhipuChatCompleteConfig: ProviderConfig = {
     param: 'stream',
     default: false,
   },
-  thinking: {
-    param: 'thinking',
-  },
-  reasoning_effort: {
-    param: 'reasoning_effort',
-  },
-  clear_thinking: {
-    param: 'clear_thinking',
-  },
 };
 
 interface ZhipuChatCompleteResponse extends ChatCompletionResponse {

@@ -1,7 +1,10 @@
 import { GatewayError } from '../errors/GatewayError';
+import { AZURE_OPEN_AI, FIREWORKS_AI } from '../globals';
 import ProviderConfigs from '../providers';
 import { endpointStrings, ProviderConfig } from '../providers/types';
 import { Options, Params } from '../types/requestBody';
+
+// TODO: Refactor this file to use the providerOptions object instead of the provider string
 
 /**
  * Helper function to set a nested property in an object.
@@ -22,12 +25,17 @@ function setNestedProperty(obj: any, path: string, value: any) {
   current[parts[parts.length - 1]] = value;
 }
 
-const getValue = (configParam: string, params: Params, paramConfig: any) => {
+const getValue = (
+  configParam: string,
+  params: Params,
+  paramConfig: any,
+  providerOptions: Options
+) => {
   let value = params[configParam as keyof typeof params];
 
   // If a transformation is defined for this parameter, apply it
   if (paramConfig.transform) {
-    value = paramConfig.transform(params);
+    value = paramConfig.transform(params, providerOptions);
   }
 
   if (
@@ -67,52 +75,9 @@ const getValue = (configParam: string, params: Params, paramConfig: any) => {
 export const transformUsingProviderConfig = (
   providerConfig: ProviderConfig,
   params: Params,
-  providerOptions?: Options
+  providerOptions: Options
 ) => {
   const transformedRequest: { [key: string]: any } = {};
-  // Older browser clients used the Python SDK's `extra_body` wrapper. The JS
-  // SDK sends that wrapper literally, so normalize known reasoning fields to
-  // top-level params before applying provider mappings while preserving
-  // compatibility with existing clients.
-  const normalizedParams: Params = { ...params };
-  if (params.extra_body && typeof params.extra_body === 'object') {
-    for (const key of [
-      'reasoning_effort',
-      'thinking',
-      'enable_thinking',
-      'thinking_budget',
-      'preserve_thinking',
-      'clear_thinking'
-    ]) {
-      if (!(key in normalizedParams) && key in params.extra_body) {
-        (normalizedParams as any)[key] = params.extra_body[key];
-      }
-    }
-  }
-  // Cloud clients use the stable OpenAI `reasoning_effort` contract. Convert
-  // it at the gateway boundary for routed vendor models so a route can point
-  // to Qwen/DeepSeek/GLM without making the browser know its backend dialect.
-  const model = String(normalizedParams.model || '').toLowerCase();
-  const effort = normalizedParams.reasoning_effort;
-  if (effort !== undefined && /qwen|qwq/.test(model) && normalizedParams.enable_thinking === undefined) {
-    if (effort === 'none') {
-      normalizedParams.enable_thinking = false;
-    } else {
-      normalizedParams.enable_thinking = true;
-      normalizedParams.thinking_budget = ({low: 1024, medium: 4096, high: 16384, xhigh: 32768, max: 32768} as Record<string, number>)[effort] || 4096;
-    }
-    delete normalizedParams.reasoning_effort;
-  } else if (effort !== undefined && /deepseek/.test(model) && normalizedParams.thinking === undefined) {
-    normalizedParams.thinking = {type: effort === 'none' ? 'disabled' : 'enabled'};
-    if (!/deepseek-v4/.test(model)) delete normalizedParams.reasoning_effort;
-    else if (effort === 'medium') normalizedParams.reasoning_effort = 'high';
-    else if (effort === 'xhigh') normalizedParams.reasoning_effort = 'max';
-  } else if (effort !== undefined && /glm/.test(model) && normalizedParams.thinking === undefined) {
-    normalizedParams.thinking = {type: effort === 'none' ? 'disabled' : 'enabled'};
-    if (!/glm-5\.[23]/.test(model)) delete normalizedParams.reasoning_effort;
-    else if (effort === 'medium') normalizedParams.reasoning_effort = 'high';
-    else if (effort === 'xhigh') normalizedParams.reasoning_effort = 'max';
-  }
 
   // For each parameter in the provider's configuration
   for (const configParam in providerConfig) {
@@ -124,9 +89,14 @@ export const transformUsingProviderConfig = (
 
     for (const paramConfig of paramConfigs) {
       // If the parameter is present in the incoming request body
-      if (configParam in normalizedParams) {
+      if (configParam in params) {
         // Get the value for this parameter
-        const value = getValue(configParam, normalizedParams, paramConfig);
+        const value = getValue(
+          configParam,
+          params,
+          paramConfig,
+          providerOptions
+        );
 
         // Set the transformed parameter to the validated value
         setNestedProperty(
@@ -179,7 +149,7 @@ const transformToProviderRequestJSON = (
   // Get the configuration for the specified provider
   let providerConfig = ProviderConfigs[provider];
   if (providerConfig.getConfig) {
-    providerConfig = providerConfig.getConfig(params)[fn];
+    providerConfig = providerConfig.getConfig({ params, providerOptions })[fn];
   } else {
     providerConfig = providerConfig[fn];
   }
@@ -194,11 +164,12 @@ const transformToProviderRequestJSON = (
 const transformToProviderRequestFormData = (
   provider: string,
   params: Params,
-  fn: string
+  fn: string,
+  providerOptions: Options
 ): FormData => {
   let providerConfig = ProviderConfigs[provider];
   if (providerConfig.getConfig) {
-    providerConfig = providerConfig.getConfig(params)[fn];
+    providerConfig = providerConfig.getConfig({ params, providerOptions })[fn];
   } else {
     providerConfig = providerConfig[fn];
   }
@@ -210,7 +181,12 @@ const transformToProviderRequestFormData = (
     }
     for (const paramConfig of paramConfigs) {
       if (configParam in params) {
-        const value = getValue(configParam, params, paramConfig);
+        const value = getValue(
+          configParam,
+          params,
+          paramConfig,
+          providerOptions
+        );
 
         formData.append(paramConfig.param, value);
       } else if (
@@ -231,22 +207,19 @@ const transformToProviderRequestFormData = (
   return formData;
 };
 
-const transformToProviderRequestReadableStream = (
+const transformToProviderRequestBody = (
   provider: string,
   requestBody: ReadableStream,
   requestHeaders: Record<string, string>,
+  providerOptions: Options,
   fn: string
 ) => {
-  if (ProviderConfigs[provider].getConfig) {
-    return ProviderConfigs[provider]
-      .getConfig({}, fn)
-      .requestTransforms[fn](requestBody, requestHeaders);
-  } else {
-    return ProviderConfigs[provider].requestTransforms[fn](
-      requestBody,
-      requestHeaders
-    );
+  let providerConfig = ProviderConfigs[provider];
+  if (providerConfig.getConfig) {
+    providerConfig = providerConfig.getConfig({ params: {}, providerOptions });
   }
+
+  return providerConfig.requestTransforms[fn](requestBody, requestHeaders);
 };
 
 /**
@@ -268,13 +241,28 @@ export const transformToProviderRequest = (
 ) => {
   // this returns a ReadableStream
   if (fn === 'uploadFile') {
-    return transformToProviderRequestReadableStream(
+    return transformToProviderRequestBody(
       provider,
       requestBody as ReadableStream,
       requestHeaders,
+      providerOptions,
       fn
     );
   }
+
+  if (
+    fn === 'createFinetune' &&
+    [AZURE_OPEN_AI, FIREWORKS_AI].includes(provider)
+  ) {
+    return transformToProviderRequestBody(
+      provider,
+      requestBody as ReadableStream,
+      requestHeaders,
+      providerOptions,
+      fn
+    );
+  }
+
   if (requestBody instanceof FormData || requestBody instanceof ArrayBuffer)
     return requestBody;
 
@@ -287,7 +275,12 @@ export const transformToProviderRequest = (
     providerAPIConfig.transformToFormData &&
     providerAPIConfig.transformToFormData({ gatewayRequestBody: params })
   )
-    return transformToProviderRequestFormData(provider, params as Params, fn);
+    return transformToProviderRequestFormData(
+      provider,
+      params as Params,
+      fn,
+      providerOptions
+    );
   return transformToProviderRequestJSON(
     provider,
     params as Params,

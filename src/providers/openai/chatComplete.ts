@@ -118,20 +118,17 @@ export const OpenAIChatCompleteConfig: ProviderConfig = {
   reasoning_effort: {
     param: 'reasoning_effort',
   },
-  thinking: {
-    param: 'thinking',
+  web_search_options: {
+    param: 'web_search_options',
   },
-  enable_thinking: {
-    param: 'enable_thinking',
+  prompt_cache_key: {
+    param: 'prompt_cache_key',
   },
-  thinking_budget: {
-    param: 'thinking_budget',
+  safety_identifier: {
+    param: 'safety_identifier',
   },
-  preserve_thinking: {
-    param: 'preserve_thinking',
-  },
-  clear_thinking: {
-    param: 'clear_thinking',
+  verbosity: {
+    param: 'verbosity',
   },
 };
 
@@ -184,7 +181,7 @@ export const OpenAIChatCompleteJSONToStreamResponseTransform: (
   const streamChunkTemplate: Record<string, any> = {
     id,
     object: 'chat.completion.chunk',
-    created: Date.now(),
+    created: Math.floor(Date.now() / 1000),
     model: model || '',
     system_fingerprint: system_fingerprint || null,
     provider,

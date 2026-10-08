@@ -34,14 +34,16 @@ export class HookSpan {
     beforeRequestHooks: HookObject[],
     afterRequestHooks: HookObject[],
     parentHookSpanId: string | null,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ) {
     this.context = this.createContext(
       requestParams,
       metadata,
       provider,
       isStreamingRequest,
-      requestType
+      requestType,
+      requestHeaders
     );
     this.beforeRequestHooks = this.initializeHooks(
       beforeRequestHooks,
@@ -64,7 +66,8 @@ export class HookSpan {
     metadata: Record<string, string>,
     provider: string,
     isStreamingRequest: boolean,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ): HookSpanContext {
     const requestText = this.extractRequestText(requestParams);
     return {
@@ -73,6 +76,7 @@ export class HookSpan {
         text: requestText,
         isStreamingRequest,
         isTransformed: false,
+        headers: requestHeaders,
       },
       response: {
         json: {},
@@ -211,7 +215,8 @@ export class HooksManager {
     beforeRequestHooks: HookObject[],
     afterRequestHooks: HookObject[],
     parentHookSpanId: string | null,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ): HookSpan {
     const span = new HookSpan(
       requestParams,
@@ -221,7 +226,8 @@ export class HooksManager {
       beforeRequestHooks,
       afterRequestHooks,
       parentHookSpanId,
-      requestType
+      requestType,
+      requestHeaders
     );
 
     this.spans[span.id] = span;
@@ -299,6 +305,9 @@ export class HooksManager {
         execution_time: new Date().getTime() - createdAt.getTime(),
         transformed: result.transformed || false,
         created_at: createdAt,
+        log: result.log || null,
+        fail_on_error:
+          (check.parameters as Record<string, any>)?.failOnError || false,
       };
     } catch (err: any) {
       console.error(`Error executing check "${check.id}":`, err);
@@ -354,36 +363,65 @@ export class HooksManager {
     }
 
     if (hook.type === HookType.GUARDRAIL && hook.checks) {
-      checkResults = await Promise.all(
-        hook.checks
-          .filter((check: Check) => check.is_enabled !== false)
-          .map((check: Check) =>
-            this.executeFunction(
-              span.getContext(),
-              check,
-              hook.eventType,
-              options
-            )
-          )
-      );
-
-      checkResults.forEach((checkResult) => {
-        if (
-          checkResult.transformedData &&
-          (checkResult.transformedData.response.json ||
-            checkResult.transformedData.request.json)
-        ) {
-          span.setContextAfterTransform(
-            checkResult.transformedData.response.json,
-            checkResult.transformedData.request.json
+      if (hook.sequential) {
+        // execute checks sequentially and update the context after each check
+        for (const check of hook.checks.filter(
+          (check: Check) => check.is_enabled !== false
+        )) {
+          const result = await this.executeFunction(
+            span.getContext(),
+            check,
+            hook.eventType,
+            options
           );
+          if (
+            result.transformedData &&
+            (result.transformedData.response.json ||
+              result.transformedData.request.json)
+          ) {
+            span.setContextAfterTransform(
+              result.transformedData.response.json,
+              result.transformedData.request.json
+            );
+          }
+          delete result.transformedData;
+          checkResults.push(result);
         }
-        delete checkResult.transformedData;
-      });
+      } else {
+        checkResults = await Promise.all(
+          hook.checks
+            .filter((check: Check) => check.is_enabled !== false)
+            .map((check: Check) =>
+              this.executeFunction(
+                span.getContext(),
+                check,
+                hook.eventType,
+                options
+              )
+            )
+        );
+
+        checkResults.forEach((checkResult) => {
+          if (
+            checkResult.transformedData &&
+            (checkResult.transformedData.response.json ||
+              checkResult.transformedData.request.json)
+          ) {
+            span.setContextAfterTransform(
+              checkResult.transformedData.response.json,
+              checkResult.transformedData.request.json
+            );
+          }
+          delete checkResult.transformedData;
+        });
+      }
     }
 
     hookResult = {
-      verdict: checkResults.every((result) => result.verdict || result.error),
+      // if guardrail has error, make verdict false else do the normal check
+      verdict: checkResults.every(
+        (result) => result.verdict || (result.error && !result.fail_on_error)
+      ),
       id: hook.id,
       transformed: checkResults.some((result) => result.transformed),
       checks: checkResults,
@@ -411,15 +449,14 @@ export class HooksManager {
   private shouldSkipHook(span: HookSpan, hook: HookObject): boolean {
     const context = span.getContext();
     return (
-      !['chatComplete', 'complete', 'embed'].includes(context.requestType) ||
+      !['chatComplete', 'complete', 'embed', 'messages'].includes(
+        context.requestType
+      ) ||
       (context.requestType === 'embed' &&
         hook.eventType !== 'beforeRequestHook') ||
       (context.requestType === 'embed' && hook.type === HookType.MUTATOR) ||
       (hook.eventType === 'afterRequestHook' &&
         context.response.statusCode !== 200) ||
-      (hook.eventType === 'afterRequestHook' &&
-        context.request.isStreamingRequest &&
-        !context.response.text) ||
       (hook.eventType === 'beforeRequestHook' &&
         span.getParentHookSpanId() !== null) ||
       (hook.type === HookType.MUTATOR && !!hook.async)
@@ -465,7 +502,7 @@ export class HooksManager {
       .join(', ');
   }
 
-  private getHooksToExecute(
+  public getHooksToExecute(
     span: HookSpan,
     eventTypePresets: string[]
   ): HookObject[] {

@@ -1,3 +1,4 @@
+import { Params } from '../../types/requestBody';
 import { ChatCompletionResponse, GroundingMetadata } from '../types';
 
 export interface GoogleErrorResponse {
@@ -20,6 +21,11 @@ export interface GoogleResponseCandidate {
       text?: string;
       thought?: string; // for models like gemini-2.0-flash-thinking-exp refer: https://ai.google.dev/gemini-api/docs/thinking-mode#streaming_model_thinking
       functionCall?: GoogleGenerateFunctionCall;
+      inlineData?: {
+        mimeType: string;
+        data: string;
+      };
+      thoughtSignature?: string;
     }[];
   };
   logprobsResult?: {
@@ -65,6 +71,16 @@ export interface GoogleGenerateContentResponse {
     promptTokenCount: number;
     candidatesTokenCount: number;
     totalTokenCount: number;
+    thoughtsTokenCount?: number;
+    cachedContentTokenCount?: number;
+    promptTokensDetails: {
+      modality: VERTEX_MODALITY;
+      tokenCount: number;
+    }[];
+    candidatesTokensDetails: {
+      modality: VERTEX_MODALITY;
+      tokenCount: number;
+    }[];
   };
 }
 
@@ -92,9 +108,27 @@ export interface VertexLlamaChatCompleteStreamChunk {
   provider?: string;
 }
 
-export interface EmbedInstancesData {
+export type EmbedInstancesData = TextEmbedInstance | MultimodalEmbedInstance;
+
+export interface TextEmbedInstance {
   task_type: string;
   content: string;
+}
+export interface MultimodalEmbedInstance {
+  image?: {
+    gcsUri?: string;
+    bytesBase64Encoded?: string;
+  };
+  text?: string;
+  video?: {
+    gcsUri?: string;
+    bytesBase64Encoded?: string;
+    videoSegmentConfig?: {
+      startOffsetSec?: number;
+      endOffsetSec?: number;
+      intervalSec?: number;
+    };
+  };
 }
 
 interface EmbedPredictionsResponse {
@@ -105,6 +139,13 @@ interface EmbedPredictionsResponse {
       token_count: number;
     };
   };
+  imageEmbedding?: number[];
+  textEmbedding?: number[];
+  videoEmbeddings?: {
+    embedding: number[];
+    endOffsetSec: number;
+    startOffsetSec: number;
+  }[];
 }
 
 export interface GoogleEmbedResponse {
@@ -172,7 +213,7 @@ export interface GoogleBatchRecord {
   };
   startTime: string;
   endTime: string;
-  completionsStats?: {
+  completionStats?: {
     successfulCount: string;
     failedCount: string;
     incompleteCount: string;
@@ -215,5 +256,30 @@ export interface GoogleFinetuneRecord {
       epochCount: number;
       adapterSize: number;
     };
+  };
+}
+
+export enum VERTEX_GEMINI_GENERATE_CONTENT_FINISH_REASON {
+  FINISH_REASON_UNSPECIFIED = 'FINISH_REASON_UNSPECIFIED',
+  STOP = 'STOP',
+  MAX_TOKENS = 'MAX_TOKENS',
+  SAFETY = 'SAFETY',
+  RECITATION = 'RECITATION',
+  OTHER = 'OTHER',
+  BLOCKLIST = 'BLOCKLIST',
+  PROHIBITED_CONTENT = 'PROHIBITED_CONTENT',
+  SPII = 'SPII',
+}
+
+export enum VERTEX_MODALITY {
+  MODALITY_UNSPECIFIED = 'MODALITY_UNSPECIFIED',
+  TEXT = 'TEXT',
+  IMAGE = 'IMAGE',
+  AUDIO = 'AUDIO',
+}
+export interface PortkeyGeminiParams extends Params {
+  image_config?: {
+    aspect_ratio: string; // '16:9', '4:3', '1:1'
+    image_size: string; // '2K', '4K', '8K'
   };
 }

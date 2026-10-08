@@ -1,19 +1,47 @@
 import retry from 'async-retry';
+import { MAX_RETRY_LIMIT_MS, POSSIBLE_RETRY_STATUS_HEADERS } from '../globals';
+
+function createAbortResponse(timeout?: number): Response {
+  const isTimeout = timeout !== undefined;
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: isTimeout
+          ? `Request exceeded the timeout sent in the request: ${timeout}ms`
+          : 'Request Aborted by user',
+        type: isTimeout ? 'timeout_error' : 'cancel_error',
+        param: null,
+        code: null,
+      },
+    }),
+    {
+      headers: { 'content-type': 'application/json' },
+      status: isTimeout ? 408 : 499,
+    }
+  );
+}
 
 async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeout: number,
-  requestHandler?: () => Promise<Response>,
-  controller?: AbortController
-) {
-  if (!controller) {
-    controller = new AbortController();
+  requestHandler?: () => Promise<Response>
+): Promise<Response> {
+  // A timeout belongs to this attempt; it must not abort later retries.
+  const controller = new AbortController();
+  const callerSignal = options.signal;
+  const abortUpstream = (): void => controller.abort();
+  if (callerSignal?.aborted) {
+    abortUpstream();
+  } else {
+    callerSignal?.addEventListener('abort', abortUpstream, {
+      once: true,
+    });
   }
-  const timeoutId = setTimeout(() => controller?.abort(), timeout);
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
   const timeoutRequestOptions = {
     ...options,
-    signal: controller?.signal,
+    signal: controller.signal,
   };
 
   let response;
@@ -24,27 +52,19 @@ async function fetchWithTimeout(
     } else {
       response = await fetch(url, timeoutRequestOptions);
     }
-    clearTimeout(timeoutId);
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      response = new Response(
-        JSON.stringify({
-          error: {
-            message: `Request exceeded the timeout sent in the request: ${timeout}ms`,
-            type: 'timeout_error',
-            param: null,
-            code: null,
-          },
-        }),
-        {
-          headers: {
-            'content-type': 'application/json',
-          },
-          status: 408,
-        }
+      response = createAbortResponse(
+        callerSignal?.aborted ? undefined : timeout
       );
     } else {
       throw err;
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    // Successful streams still need to receive the caller's cancellation.
+    if (!response?.ok) {
+      callerSignal?.removeEventListener('abort', abortUpstream);
     }
   }
 
@@ -71,62 +91,116 @@ export const retryRequest = async (
   statusCodesToRetry: number[],
   timeout: number | null,
   requestHandler?: () => Promise<Response>,
-  controller?: AbortController
+  followProviderRetry?: boolean
 ): Promise<{
   response: Response;
   attempt: number | undefined;
   createdAt: Date;
+  skip: boolean;
 }> => {
   let lastResponse: Response | undefined;
   let lastAttempt: number | undefined;
-  if (!controller) {
-    controller = new AbortController();
-  }
+  const signal = options.signal;
   const start = new Date();
+  let retrySkipped = false;
+
+  let remainingRetryTimeout = MAX_RETRY_LIMIT_MS;
+
   try {
     await retry(
-      async (bail: any, attempt: number) => {
+      async (bail: any, attempt: number, rateLimiter: any) => {
         try {
-          let response: Response = new Response();
+          if (signal?.aborted) {
+            throw new DOMException('Request Aborted by user', 'AbortError');
+          }
+          let response: Response;
 
           if (timeout) {
             response = await fetchWithTimeout(
               url,
               options,
               timeout,
-              requestHandler,
-              controller
+              requestHandler
             );
           } else if (requestHandler) {
             response = await requestHandler();
           } else {
             try {
-              options.signal = controller?.signal;
               response = await fetch(url, options);
             } catch (e: any) {
               if (e.name === 'AbortError') {
-                response = new Response(JSON.stringify({
-                    error: {
-                      message: `Request Aborted by user`,
-                      type: 'cancel_error',
-                      param: null,
-                      code: null,
-                    },
-                  }),
-                  {
-                    headers: {
-                      'content-type': 'application/json',
-                    },
-                    status: 499,
-                  });
+                response = createAbortResponse();
+              } else {
+                throw e;
               }
             }
-
+          }
+          if (signal?.aborted && response.status === 499) {
+            retrySkipped = true;
           }
           if (statusCodesToRetry.includes(response.status)) {
             const errorObj: any = new Error(await response.text());
             errorObj.status = response.status;
             errorObj.headers = Object.fromEntries(response.headers);
+
+            if (response.status === 429 && followProviderRetry) {
+              // get retry header.
+              const retryHeader = POSSIBLE_RETRY_STATUS_HEADERS.find(
+                (header) => {
+                  return response.headers.get(header);
+                }
+              );
+              const retryAfterValue = response.headers.get(retryHeader ?? '');
+              // continue, if no retry header is found.
+              if (!retryAfterValue) {
+                throw errorObj;
+              }
+              let retryAfter: number | undefined;
+              // if the header is `retry-after` convert it to milliseconds.
+              if (retryHeader === 'retry-after') {
+                retryAfter = Number.parseInt(retryAfterValue.trim()) * 1000;
+              } else {
+                retryAfter = Number.parseInt(retryAfterValue.trim());
+              }
+
+              if (retryAfter && !Number.isNaN(retryAfter)) {
+                // break the loop if the retryAfter is greater than the max retry limit
+                if (
+                  retryAfter >= MAX_RETRY_LIMIT_MS ||
+                  retryAfter > remainingRetryTimeout
+                ) {
+                  retrySkipped = true;
+                  rateLimiter._timeouts = [];
+                  throw errorObj;
+                }
+                remainingRetryTimeout -= retryAfter;
+                // will reset the current backoff timeout(s) to `0`.
+                rateLimiter._timeouts = Array.from({
+                  length: retryCount - attempt + 1,
+                }).map(() => 0);
+
+                throw await new Promise((resolve) => {
+                  const abortWait = (): void => {
+                    clearTimeout(retryTimeoutId);
+                    resolve(errorObj);
+                  };
+                  const retryTimeoutId = setTimeout(() => {
+                    signal?.removeEventListener('abort', abortWait);
+                    resolve(errorObj);
+                  }, retryAfter);
+                  if (signal?.aborted) {
+                    abortWait();
+                  } else {
+                    signal?.addEventListener('abort', abortWait, {
+                      once: true,
+                    });
+                  }
+                });
+              } else {
+                throw errorObj;
+              }
+            }
+
             throw errorObj;
           } else if (response.status >= 200 && response.status <= 204) {
             // do nothing
@@ -140,6 +214,15 @@ export const retryRequest = async (
           }
           lastResponse = response;
         } catch (error: any) {
+          if (signal?.aborted) {
+            retrySkipped = true;
+            const abortResponse = createAbortResponse();
+            const abortError: any = new Error(await abortResponse.text());
+            abortError.status = abortResponse.status;
+            abortError.headers = Object.fromEntries(abortResponse.headers);
+            bail(abortError);
+            return;
+          }
           if (attempt >= retryCount + 1) {
             bail(error);
             return;
@@ -151,7 +234,6 @@ export const retryRequest = async (
         retries: retryCount,
         onRetry: (error: Error, attempt: number) => {
           lastAttempt = attempt;
-          console.warn(`Failed in Retry attempt ${attempt}. Error: ${error}`);
         },
         randomize: false,
       }
@@ -162,13 +244,18 @@ export const retryRequest = async (
       error.cause instanceof Error &&
       error.cause?.name === 'ConnectTimeoutError'
     ) {
-      console.error('ConnectTimeoutError: ', error.cause);
+      console.error(
+        'retryRequest ConnectTimeoutError error:',
+        error.cause,
+        error.message
+      );
       // This error comes in case the host address is unreachable. Empty status code used to get returned
       // from here hence no retry logic used to get called.
       lastResponse = new Response(error.message, {
         status: 503,
       });
     } else if (!error.status || error instanceof TypeError) {
+      console.error('retryRequest error:', error.cause, error.message);
       // The retry handler will always attach status code to the error object
       lastResponse = new Response(
         `Message: ${error.message} Cause: ${error.cause ?? 'NA'} Name: ${error.name}`,
@@ -182,13 +269,11 @@ export const retryRequest = async (
         headers: error.headers,
       });
     }
-    console.warn(
-      `Tried ${lastAttempt ?? 1} time(s) but failed. Error: ${JSON.stringify(error)}`
-    );
   }
   return {
     response: lastResponse as Response,
     attempt: lastAttempt,
-    createdAt: start
+    createdAt: start,
+    skip: retrySkipped,
   };
 };

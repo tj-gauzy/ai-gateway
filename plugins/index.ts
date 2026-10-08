@@ -13,6 +13,16 @@ import { handler as defaultalluppercase } from './default/alluppercase';
 import { handler as defaultalllowercase } from './default/alllowercase';
 import { handler as defaultendsWith } from './default/endsWith';
 import { handler as defaultmodelWhitelist } from './default/modelWhitelist';
+import { handler as defaultnotNull } from './default/notNull';
+import { handler as qualifireContentModeration } from './qualifire/contentModeration';
+import { handler as qualifireGrounding } from './qualifire/grounding';
+import { handler as qualifirePolicy } from './qualifire/policy';
+import { handler as qualifireToolUseQuality } from './qualifire/toolUseQuality';
+import { handler as qualifireHallucinations } from './qualifire/hallucinations';
+import { handler as qualifirePii } from './qualifire/pii';
+import { handler as qualifirePromptInjections } from './qualifire/promptInjections';
+import { handler as defaultaddPrefix } from './default/addPrefix';
+import { handler as defaultmodelRules } from './default/modelRules';
 import { handler as portkeymoderateContent } from './portkey/moderateContent';
 import { handler as portkeylanguage } from './portkey/language';
 import { handler as portkeypii } from './portkey/pii';
@@ -41,6 +51,22 @@ import { handler as pangeapii } from './pangea/pii';
 import { pluginHandler as bedrockHandler } from './bedrock/index';
 import { handler as acuvityScan } from './acuvity/scan';
 import { handler as lassoclassify } from './lasso/classify';
+import { handler as exaonline } from './exa/online';
+import { handler as azurePii } from './azure/pii';
+import { handler as azureContentSafety } from './azure/contentSafety';
+import { handler as promptSecurityProtectPrompt } from './promptsecurity/protectPrompt';
+import { handler as promptSecurityProtectResponse } from './promptsecurity/protectResponse';
+import { handler as panwPrismaAirsintercept } from './panw-prisma-airs/intercept';
+import { handler as defaultjwt } from './default/jwt';
+import { handler as defaultrequiredMetadataKeys } from './default/requiredMetadataKeys';
+import { handler as walledaiguardrails } from './walledai/walledprotect';
+import { handler as defaultregexReplace } from './default/regexReplace';
+import { handler as defaultallowedRequestTypes } from './default/allowedRequestTypes';
+import { handler as javelinguardrails } from './javelin/guardrails';
+import { handler as f5GuardrailsScan } from './f5-guardrails/scan';
+import { handler as azureShieldPrompt } from './azure/shieldPrompt';
+import { handler as azureProtectedMaterial } from './azure/protectedMaterial';
+import { handler as crowdstrikeAidrGuardChatCompletions } from './crowdstrike-aidr/guardChatCompletion';
 
 export const plugins = {
   default: {
@@ -59,6 +85,22 @@ export const plugins = {
     alllowercase: defaultalllowercase,
     endsWith: defaultendsWith,
     modelWhitelist: defaultmodelWhitelist,
+    modelRules: defaultmodelRules,
+    jwt: defaultjwt,
+    requiredMetadataKeys: defaultrequiredMetadataKeys,
+    addPrefix: defaultaddPrefix,
+    regexReplace: defaultregexReplace,
+    allowedRequestTypes: defaultallowedRequestTypes,
+    notNull: defaultnotNull,
+  },
+  qualifire: {
+    contentModeration: qualifireContentModeration,
+    grounding: qualifireGrounding,
+    policy: qualifirePolicy,
+    toolUseQuality: qualifireToolUseQuality,
+    hallucinations: qualifireHallucinations,
+    pii: qualifirePii,
+    promptInjections: qualifirePromptInjections,
   },
   portkey: {
     moderateContent: portkeymoderateContent,
@@ -109,5 +151,33 @@ export const plugins = {
   },
   lasso: {
     classify: lassoclassify,
+  },
+  exa: {
+    online: exaonline,
+  },
+  azure: {
+    pii: azurePii,
+    contentSafety: azureContentSafety,
+    shieldPrompt: azureShieldPrompt,
+    protectedMaterial: azureProtectedMaterial,
+  },
+  promptsecurity: {
+    protectPrompt: promptSecurityProtectPrompt,
+    protectResponse: promptSecurityProtectResponse,
+  },
+  'panw-prisma-airs': {
+    intercept: panwPrismaAirsintercept,
+  },
+  walledai: {
+    walledprotect: walledaiguardrails,
+  },
+  javelin: {
+    guardrails: javelinguardrails,
+  },
+  'f5-guardrails': {
+    scan: f5GuardrailsScan,
+  },
+  'crowdstrike-aidr': {
+    guardChatCompletions: crowdstrikeAidrGuardChatCompletions,
   },
 };

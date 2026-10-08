@@ -28,22 +28,6 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "insert_location": {
-            "type": "string",
-            "label": "Insert Location",
-            "description": [
-              {
-                "type": "subHeading",
-                "text": "Where to add the search context in the request"
-              }
-            ],
-            "enum": [
-              "append_to_system",
-              "add_user_after_system",
-              "add_user_to_end"
-            ],
-            "default": "append_to_system"
-          },
           "prefix": {
             "type": "string",
             "label": "Context Prefix",
@@ -77,6 +61,32 @@
             ],
             "default": 5
           },
+          "includeDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "label": "Include Domains",
+            "description": [
+              {
+                "type": "subHeading",
+                "text": "Limit search results to these domains (e.g., ['nytimes.com', 'bbc.com'])"
+              }
+            ]
+          },
+          "excludeDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "label": "Exclude Domains",
+            "description": [
+              {
+                "type": "subHeading",
+                "text": "Remove these domains from search results (e.g., ['wikipedia.org', 'reddit.com'])"
+              }
+            ]
+          },
           "timeout": {
             "type": "number",
             "label": "Timeout",
@@ -89,7 +99,7 @@
             "default": 10000
           }
         },
-        "required": ["insert_location"]
+        "required": []
       }
     }
   ]

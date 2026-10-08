@@ -1,12 +1,23 @@
 import { Context } from 'hono';
 import { Message, Options, Params } from '../types/requestBody';
+import { ANTHROPIC_STOP_REASON } from './anthropic/types';
+import {
+  BEDROCK_CONVERSE_STOP_REASON,
+  TITAN_STOP_REASON,
+} from './bedrock/types';
+import { VERTEX_GEMINI_GENERATE_CONTENT_FINISH_REASON } from './google-vertex-ai/types';
+import { GOOGLE_GENERATE_CONTENT_FINISH_REASON } from './google/types';
+import { DEEPSEEK_STOP_REASON } from './deepseek/types';
+import { MISTRAL_AI_FINISH_REASON } from './mistral-ai/types';
+import { TOGETHER_AI_FINISH_REASON } from './together-ai/types';
+import { COHERE_STOP_REASON } from './cohere/types';
 
 /**
  * Configuration for a parameter.
  * @interface
  */
 export interface ParameterConfig {
-  /** The name of the parameter. */
+  /** corresponding provider parameter key in the transformed request body */
   param: string;
   /** The default value of the parameter, if not provided in the request. */
   default?: any;
@@ -17,7 +28,7 @@ export interface ParameterConfig {
   /** Whether the parameter is required. */
   required?: boolean;
   /** A function to transform the value of the parameter. */
-  transform?: Function;
+  transform?: (params: any, providerOptions: Options) => any;
 }
 
 /**
@@ -42,6 +53,7 @@ export interface ProviderAPIConfig {
     transformedRequestBody: Record<string, any>;
     transformedRequestUrl: string;
     gatewayRequestBody?: Params;
+    headers?: Record<string, string>;
   }) => Promise<Record<string, any>> | Record<string, any>;
   /** A function to generate the baseURL based on parameters */
   getBaseURL: (args: {
@@ -50,6 +62,7 @@ export interface ProviderAPIConfig {
     requestHeaders?: Record<string, string>;
     c: Context;
     gatewayRequestURL: string;
+    params?: Params;
   }) => Promise<string> | string;
   /** A function to generate the endpoint based on parameters */
   getEndpoint: (args: {
@@ -77,8 +90,10 @@ export type endpointStrings =
   | 'moderate'
   | 'stream-complete'
   | 'stream-chatComplete'
+  | 'stream-messages'
   | 'proxy'
   | 'imageGenerate'
+  | 'imageEdit'
   | 'createSpeech'
   | 'createTranscription'
   | 'createTranslation'
@@ -96,7 +111,13 @@ export type endpointStrings =
   | 'listFinetunes'
   | 'createFinetune'
   | 'retrieveFinetune'
-  | 'cancelFinetune';
+  | 'cancelFinetune'
+  | 'createModelResponse'
+  | 'getModelResponse'
+  | 'deleteModelResponse'
+  | 'listResponseInputItems'
+  | 'messages'
+  | 'messagesCountTokens';
 
 /**
  * A collection of API configurations for multiple AI providers.
@@ -129,6 +150,13 @@ export interface ProviderConfigs {
   /** The configuration for each provider, indexed by provider name. */
   [key: string]: any;
   requestHandlers?: RequestHandlers;
+  getConfig?: ({
+    params,
+    providerOptions,
+  }: {
+    params: Params;
+    providerOptions: Options;
+  }) => any;
 }
 
 export interface BaseResponse {
@@ -147,6 +175,16 @@ export interface CResponse extends BaseResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    completion_tokens_details?: {
+      accepted_prediction_tokens?: number;
+      audio_tokens?: number;
+      reasoning_tokens?: number;
+      rejected_prediction_tokens?: number;
+    };
+    prompt_tokens_details?: {
+      audio_tokens?: number;
+      cached_tokens?: number;
+    };
     /*
      * Anthropic Prompt cache token usage
      */
@@ -332,6 +370,8 @@ interface Batch {
     failed: number;
   };
   metadata?: Record<string, any>;
+  output_blob?: string;
+  error_blob?: string;
 }
 
 export interface CreateBatchResponse extends Batch {}
@@ -395,3 +435,22 @@ export interface StreamContentBlock {
     data?: string;
   };
 }
+
+export enum FINISH_REASON {
+  stop = 'stop',
+  length = 'length',
+  tool_calls = 'tool_calls',
+  content_filter = 'content_filter',
+  function_call = 'function_call',
+}
+
+export type PROVIDER_FINISH_REASON =
+  | ANTHROPIC_STOP_REASON
+  | BEDROCK_CONVERSE_STOP_REASON
+  | VERTEX_GEMINI_GENERATE_CONTENT_FINISH_REASON
+  | GOOGLE_GENERATE_CONTENT_FINISH_REASON
+  | TITAN_STOP_REASON
+  | DEEPSEEK_STOP_REASON
+  | MISTRAL_AI_FINISH_REASON
+  | TOGETHER_AI_FINISH_REASON
+  | COHERE_STOP_REASON;

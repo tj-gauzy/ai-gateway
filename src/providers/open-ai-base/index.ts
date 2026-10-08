@@ -1,10 +1,19 @@
 import { OPEN_AI } from '../../globals';
 import { EmbedResponse } from '../../types/embedRequestBody';
+import { ResponseItemList } from '../../types/inputList';
 import { Params, Message } from '../../types/requestBody';
-import { OpenAIChatCompleteResponse } from '../openai/chatComplete';
+import {
+  OpenAIResponse,
+  ModelResponseDeleteResponse,
+} from '../../types/modelResponses';
+import {
+  OpenAIChatCompleteConfig,
+  OpenAIChatCompleteResponse,
+} from '../openai/chatComplete';
 import { OpenAICompleteResponse } from '../openai/complete';
 import { OpenAIErrorResponseTransform } from '../openai/utils';
 import { ErrorResponse, ProviderConfig } from '../types';
+import { OpenAICreateModelResponseConfig } from './createModelResponse';
 
 type CustomTransformer<T, U> = (
   response: T | ErrorResponse,
@@ -21,7 +30,6 @@ type DefaultValues = {
   [key: string]: unknown;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const excludeObjectKeys = (keyList: string[], object: Record<string, any>) => {
   if (keyList) {
     keyList.forEach((excludeKey) => {
@@ -45,11 +53,7 @@ export const chatCompleteParams = (
   extra?: ProviderConfig
 ): ProviderConfig => {
   const baseParams: ProviderConfig = {
-    model: {
-      param: 'model',
-      required: true,
-      ...(defaultValues?.model && { default: defaultValues.model }),
-    },
+    ...OpenAIChatCompleteConfig,
     messages: {
       param: 'messages',
       default: '',
@@ -61,73 +65,13 @@ export const chatCompleteParams = (
         });
       },
     },
-    functions: {
-      param: 'functions',
-    },
-    function_call: {
-      param: 'function_call',
-    },
-    max_tokens: {
-      param: 'max_tokens',
-      ...(defaultValues?.max_tokens && { default: defaultValues.max_tokens }),
-      min: 0,
-    },
-    temperature: {
-      param: 'temperature',
-      ...(defaultValues?.temperature && { default: defaultValues.temperature }),
-      min: 0,
-      max: 2,
-    },
-    top_p: {
-      param: 'top_p',
-      ...(defaultValues?.top_p && { default: defaultValues.top_p }),
-      min: 0,
-      max: 1,
-    },
-    n: {
-      param: 'n',
-      default: 1,
-    },
-    stream: {
-      param: 'stream',
-      ...(defaultValues?.stream && { default: defaultValues.stream }),
-    },
-    presence_penalty: {
-      param: 'presence_penalty',
-      min: -2,
-      max: 2,
-    },
-    frequency_penalty: {
-      param: 'frequency_penalty',
-      min: -2,
-      max: 2,
-    },
-    logit_bias: {
-      param: 'logit_bias',
-    },
-    user: {
-      param: 'user',
-    },
-    seed: {
-      param: 'seed',
-    },
-    tools: {
-      param: 'tools',
-    },
-    tool_choice: {
-      param: 'tool_choice',
-    },
-    response_format: {
-      param: 'response_format',
-    },
-    logprobs: {
-      param: 'logprobs',
-      ...(defaultValues?.logprobs && { default: defaultValues?.logprobs }),
-    },
-    stream_options: {
-      param: 'stream_options',
-    },
   };
+
+  Object.keys(defaultValues ?? {}).forEach((key) => {
+    if (Object.hasOwn(baseParams, key) && !Array.isArray(baseParams[key])) {
+      baseParams[key].default = defaultValues?.[key];
+    }
+  });
 
   // Exclude params that are not needed.
   excludeObjectKeys(exclude, baseParams);
@@ -256,9 +200,65 @@ export const embedParams = (
   return { ...baseParams, ...(extra ?? {}) };
 };
 
+export const createSpeechParams = (
+  exclude: string[],
+  defaultValues?: Record<string, string>,
+  extra?: ProviderConfig
+): ProviderConfig => {
+  const baseParams: ProviderConfig = {
+    model: {
+      param: 'model',
+      required: true,
+      default: 'tts-1',
+    },
+    input: {
+      param: 'input',
+      required: true,
+    },
+    voice: {
+      param: 'voice',
+      required: true,
+      default: 'alloy',
+    },
+    response_format: {
+      param: 'response_format',
+      required: false,
+      default: 'mp3',
+    },
+    speed: {
+      param: 'speed',
+      required: false,
+      default: 1,
+    },
+  };
+
+  excludeObjectKeys(exclude, baseParams);
+
+  return { ...baseParams, ...(extra ?? {}) };
+};
+
+export const createModelResponseParams = (
+  exclude: string[],
+  defaultValues: Record<string, string> = {},
+  extra?: ProviderConfig
+): ProviderConfig => {
+  const baseParams: ProviderConfig = {
+    ...OpenAICreateModelResponseConfig,
+  };
+
+  excludeObjectKeys(exclude, baseParams);
+
+  // Object.keys(defaultValues).forEach((key) => {
+  //   if (Object.hasOwn(baseParams, key) && !Array.isArray(baseParams[key])) {
+  //     baseParams[key].default = defaultValues[key];
+  //   }
+  // });
+
+  return { ...baseParams, ...(extra ?? {}) };
+};
+
 const EmbedResponseTransformer = <T extends EmbedResponse | ErrorResponse>(
   provider: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   customTransformer?: CustomTransformer<EmbedResponse, T>
 ) => {
   const transformer: (
@@ -284,6 +284,39 @@ const CompleteResponseTransformer = <
 >(
   provider: string,
   customTransformer?: CustomTransformer<OpenAICompleteResponse, T>
+) => {
+  const transformer: (
+    response: T | ErrorResponse,
+    responseStatus: number
+  ) => T | ErrorResponse = (response, responseStatus) => {
+    if (responseStatus !== 200 && 'error' in response) {
+      const errorResponse = OpenAIErrorResponseTransform(
+        response,
+        provider ?? OPEN_AI
+      );
+      if (customTransformer) {
+        return customTransformer(errorResponse, true);
+      }
+    }
+
+    if (customTransformer) {
+      return customTransformer(response as T);
+    }
+
+    Object.defineProperty(response, 'provider', {
+      value: provider,
+      enumerable: true,
+    });
+
+    return response;
+  };
+
+  return transformer;
+};
+
+const CreateSpeechResponseTransformer = <T extends Response | ErrorResponse>(
+  provider: string,
+  customTransformer?: CustomTransformer<Response | ErrorResponse, T>
 ) => {
   const transformer: (
     response: T | ErrorResponse,
@@ -350,6 +383,150 @@ const ChatCompleteResponseTransformer = <
   return transformer;
 };
 
+export const OpenAICreateModelResponseTransformer = <
+  T extends OpenAIResponse | ErrorResponse,
+>(
+  provider: string,
+  customTransformer?: CustomTransformer<OpenAIResponse, T>
+) => {
+  const transformer: (
+    response: T | ErrorResponse,
+    responseStatus: number
+  ) => T | ErrorResponse = (response, responseStatus) => {
+    if (responseStatus !== 200 && 'error' in response) {
+      const errorResponse = OpenAIErrorResponseTransform(
+        response as ErrorResponse,
+        provider ?? OPEN_AI
+      );
+      if (customTransformer) {
+        return customTransformer(response as ErrorResponse, true);
+      }
+
+      return errorResponse;
+    }
+
+    if (customTransformer) {
+      return customTransformer(response as T);
+    }
+
+    Object.defineProperty(response, 'provider', {
+      value: provider,
+      enumerable: true,
+    });
+    return response;
+  };
+
+  return transformer;
+};
+
+export const OpenAIGetModelResponseTransformer = <
+  T extends OpenAIResponse | ErrorResponse,
+>(
+  provider: string,
+  customTransformer?: CustomTransformer<OpenAIResponse, T>
+) => {
+  const transformer: (
+    response: T | ErrorResponse,
+    responseStatus: number
+  ) => T | ErrorResponse = (response, responseStatus) => {
+    if (responseStatus !== 200 && 'error' in response) {
+      const errorResponse = OpenAIErrorResponseTransform(
+        response as ErrorResponse,
+        provider ?? OPEN_AI
+      );
+      if (customTransformer) {
+        return customTransformer(response as ErrorResponse, true);
+      }
+
+      return errorResponse;
+    }
+
+    if (customTransformer) {
+      return customTransformer(response as T);
+    }
+
+    Object.defineProperty(response, 'provider', {
+      value: provider,
+      enumerable: true,
+    });
+    return response;
+  };
+
+  return transformer;
+};
+
+export const OpenAIDeleteModelResponseTransformer = <
+  T extends ModelResponseDeleteResponse | ErrorResponse,
+>(
+  provider: string,
+  customTransformer?: CustomTransformer<ModelResponseDeleteResponse, T>
+) => {
+  const transformer: (
+    response: T | ErrorResponse,
+    responseStatus: number
+  ) => T | ErrorResponse = (response, responseStatus) => {
+    if (responseStatus !== 200 && 'error' in response) {
+      const errorResponse = OpenAIErrorResponseTransform(
+        response,
+        provider ?? OPEN_AI
+      );
+      if (customTransformer) {
+        return customTransformer(response as ErrorResponse, true);
+      }
+
+      return errorResponse;
+    }
+
+    if (customTransformer) {
+      return customTransformer(response as T);
+    }
+
+    Object.defineProperty(response, 'provider', {
+      value: provider,
+      enumerable: true,
+    });
+    return response;
+  };
+
+  return transformer;
+};
+
+export const OpenAIListInputItemsResponseTransformer = <
+  T extends ResponseItemList | ErrorResponse,
+>(
+  provider: string,
+  customTransformer?: CustomTransformer<ResponseItemList, T>
+) => {
+  const transformer: (
+    response: T | ErrorResponse,
+    responseStatus: number
+  ) => T | ErrorResponse = (response, responseStatus) => {
+    if (responseStatus !== 200 && 'error' in response) {
+      const errorResponse = OpenAIErrorResponseTransform(
+        response,
+        provider ?? OPEN_AI
+      );
+      if (customTransformer) {
+        return customTransformer(response as ErrorResponse, true);
+      }
+
+      return errorResponse;
+    }
+
+    if (customTransformer) {
+      return customTransformer(response as T);
+    }
+
+    Object.defineProperty(response, 'provider', {
+      value: provider,
+      enumerable: true,
+    });
+    return response;
+  };
+
+  return transformer;
+};
+
 /**
  *
  * @param provider Provider value
@@ -360,6 +537,7 @@ export const responseTransformers = <
   T extends EmbedResponse | ErrorResponse,
   U extends OpenAICompleteResponse | ErrorResponse,
   V extends OpenAIChatCompleteResponse | ErrorResponse,
+  W extends Response | ErrorResponse,
 >(
   provider: string,
   options: {
@@ -370,15 +548,17 @@ export const responseTransformers = <
     chatComplete?:
       | boolean
       | CustomTransformer<OpenAIChatCompleteResponse | ErrorResponse, V>;
+    createSpeech?: boolean | CustomTransformer<Response | ErrorResponse, W>;
   }
 ) => {
   const transformers: Record<
-    'complete' | 'chatComplete' | 'embed',
+    'complete' | 'chatComplete' | 'embed' | 'createSpeech',
     Function | null
   > = {
     complete: null,
     chatComplete: null,
     embed: null,
+    createSpeech: null,
   };
 
   if (options.embed) {
@@ -404,6 +584,14 @@ export const responseTransformers = <
     );
   }
 
+  if (options.createSpeech) {
+    transformers.createSpeech = CreateSpeechResponseTransformer<W>(
+      provider,
+      typeof options.createSpeech === 'function'
+        ? options.createSpeech
+        : undefined
+    );
+  }
   return transformers;
 };
 

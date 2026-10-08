@@ -9,16 +9,72 @@ const logClients: Map<string | number, any> = new Map();
 
 const addLogClient = (clientId: any, client: any) => {
   logClients.set(clientId, client);
-  // console.log(
-  //   `New client ${clientId} connected. Total clients: ${logClients.size}`
-  // );
 };
 
 const removeLogClient = (clientId: any) => {
   logClients.delete(clientId);
-  // console.log(
-  //   `Client ${clientId} disconnected. Total clients: ${logClients.size}`
-  // );
+};
+
+const sanitizeHeaders = (headers: Record<string, unknown> = {}) =>
+  Object.fromEntries(Object.keys(headers).map((key) => [key, '[REDACTED]']));
+
+const ALLOWED_PROVIDER_OPTION_KEYS = new Set([
+  'provider',
+  'overrideParams',
+  'retry',
+  'cache',
+  'requestURL',
+  'rubeusURL',
+]);
+
+const sanitizeProviderOptions = (
+  providerOptions: Record<string, unknown> = {}
+) =>
+  Object.fromEntries(
+    Object.entries(providerOptions).map(([key, value]) => [
+      key,
+      ALLOWED_PROVIDER_OPTION_KEYS.has(key) ? value : '[REDACTED]',
+    ])
+  );
+
+const sanitizeRequestOption = (requestOption: any) => {
+  if (!requestOption || typeof requestOption !== 'object') return requestOption;
+
+  const sanitizedOption = { ...requestOption };
+
+  if (
+    sanitizedOption.providerOptions &&
+    typeof sanitizedOption.providerOptions === 'object'
+  ) {
+    sanitizedOption.providerOptions = sanitizeProviderOptions(
+      sanitizedOption.providerOptions as Record<string, unknown>
+    );
+  }
+
+  if (
+    sanitizedOption.transformedRequest &&
+    typeof sanitizedOption.transformedRequest === 'object'
+  ) {
+    sanitizedOption.transformedRequest = {
+      ...sanitizedOption.transformedRequest,
+    };
+    if (sanitizedOption.transformedRequest.headers) {
+      sanitizedOption.transformedRequest.headers = sanitizeHeaders(
+        sanitizedOption.transformedRequest.headers as Record<string, unknown>
+      );
+    }
+  }
+
+  if (
+    sanitizedOption.responseHeaders &&
+    typeof sanitizedOption.responseHeaders === 'object'
+  ) {
+    sanitizedOption.responseHeaders = sanitizeHeaders(
+      sanitizedOption.responseHeaders as Record<string, unknown>
+    );
+  }
+
+  return sanitizedOption;
 };
 
 const broadcastLog = async (log: any) => {
@@ -85,12 +141,12 @@ async function processLog(c: Context, start: number) {
       endpoint: c.req.url.split(':8787')[1],
       status: c.res.status,
       duration: ms,
-      requestOptions: requestOptionsArray,
+      requestOptions: requestOptionsArray.map(sanitizeRequestOption),
     })
   );
 }
 
-export const logger = () => {
+export const logHandler = () => {
   return async (c: Context, next: any) => {
     c.set('addLogClient', addLogClient);
     c.set('removeLogClient', removeLogClient);

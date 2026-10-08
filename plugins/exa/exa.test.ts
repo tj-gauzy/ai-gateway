@@ -26,8 +26,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      num_results: 1,
-      insert_location: 'append_to_system',
+      numResults: 1,
     };
 
     const result = await onlineHandler(
@@ -42,7 +41,7 @@ describe('exa online handler', () => {
     expect(result.transformed).toBe(false);
   });
 
-  it('should enhance chat completion request with search results appended to system message', async () => {
+  it('should enhance chat completion request by appending search results to system message', async () => {
     const eventType = 'beforeRequestHook';
     const context = {
       request: {
@@ -65,8 +64,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      insert_location: 'append_to_system',
-      num_results: 1,
+      numResults: 1,
     };
 
     const result = await onlineHandler(
@@ -83,7 +81,6 @@ describe('exa online handler', () => {
     // Check that system message was enhanced
     const messages = result.transformedData.request.json.messages;
 
-    console.log(messages);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toContain('You are a helpful assistant.');
     expect(messages[0].content).toContain('<web_search_context>');
@@ -110,8 +107,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      insert_location: 'append_to_system',
-      num_results: 1,
+      numResults: 1,
     };
 
     const result = await onlineHandler(
@@ -131,102 +127,6 @@ describe('exa online handler', () => {
     expect(messages[0].content).toContain('<web_search_context>');
     expect(messages[1].role).toBe('user');
     expect(messages[1].content).toBe('What are recent advances in AI?');
-  });
-
-  it('should add a user message after system with search results', async () => {
-    const eventType = 'beforeRequestHook';
-    const context = {
-      request: {
-        text: 'What are recent advances in AI?',
-        json: {
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful assistant.',
-            },
-            {
-              role: 'user',
-              content: 'What are recent advances in AI?',
-            },
-          ],
-        },
-      },
-      requestType: 'chatComplete',
-    };
-
-    const parameters = {
-      credentials: testCreds,
-      insert_location: 'add_user_after_system',
-      num_results: 1,
-    };
-
-    const result = await onlineHandler(
-      context as PluginContext,
-      parameters,
-      eventType
-    );
-
-    expect(result).toBeDefined();
-    expect(result.verdict).toBe(true);
-    expect(result.error).toBeNull();
-    expect(result.transformed).toBe(true);
-
-    // Check that a new user message was added after system
-    const messages = result.transformedData.request.json.messages;
-    expect(messages[0].role).toBe('system');
-    expect(messages[0].content).toBe('You are a helpful assistant.');
-    expect(messages[1].role).toBe('user');
-    expect(messages[1].content).toContain('<web_search_context>');
-    expect(messages[2].role).toBe('user');
-    expect(messages[2].content).toBe('What are recent advances in AI?');
-  });
-
-  it('should add a user message at the end with search results', async () => {
-    const eventType = 'beforeRequestHook';
-    const context = {
-      request: {
-        text: 'What are recent advances in AI?',
-        json: {
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful assistant.',
-            },
-            {
-              role: 'user',
-              content: 'What are recent advances in AI?',
-            },
-          ],
-        },
-      },
-      requestType: 'chatComplete',
-    };
-
-    const parameters = {
-      credentials: testCreds,
-      insert_location: 'add_user_to_end',
-      num_results: 1,
-    };
-
-    const result = await onlineHandler(
-      context as PluginContext,
-      parameters,
-      eventType
-    );
-
-    expect(result).toBeDefined();
-    expect(result.verdict).toBe(true);
-    expect(result.error).toBeNull();
-    expect(result.transformed).toBe(true);
-
-    // Check that a new user message was added at the end
-    const messages = result.transformedData.request.json.messages;
-    expect(messages[0].role).toBe('system');
-    expect(messages[0].content).toBe('You are a helpful assistant.');
-    expect(messages[1].role).toBe('user');
-    expect(messages[1].content).toBe('What are recent advances in AI?');
-    expect(messages[2].role).toBe('user');
-    expect(messages[2].content).toContain('<web_search_context>');
   });
 
   it('should use custom prefix and suffix for search results', async () => {
@@ -252,7 +152,6 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      insert_location: 'append_to_system',
       prefix: '\n[SEARCH_RESULTS]',
       suffix: '[END_RESULTS]\n',
     };
@@ -290,8 +189,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      insert_location: 'append_to_system', // Should still work for completion
-      num_results: 1,
+      numResults: 1,
     };
 
     const result = await onlineHandler(
@@ -333,7 +231,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      num_results: 1,
+      numResults: 1,
     };
 
     const result = await onlineHandler(
@@ -349,6 +247,151 @@ describe('exa online handler', () => {
     // Check that sources have the right structure
     expect(result.data.sources[0]).toHaveProperty('title');
     expect(result.data.sources[0]).toHaveProperty('url');
+  });
+
+  it('should filter results using includeDomains parameter', async () => {
+    const eventType = 'beforeRequestHook';
+    const context = {
+      request: {
+        text: 'Latest news on climate change',
+        json: {
+          messages: [
+            {
+              role: 'user',
+              content: 'Latest news on climate change',
+            },
+          ],
+        },
+      },
+      requestType: 'chatComplete',
+    };
+
+    const parameters = {
+      credentials: testCreds,
+      includeDomains: ['theguardian.com', 'bbc.com'],
+      numResults: 3,
+    };
+
+    const result = await onlineHandler(
+      context as PluginContext,
+      parameters,
+      eventType
+    );
+
+    // We might not get results if the domains don't have matching content
+    if (result.transformed) {
+      expect(result.data.sources.length).toBeGreaterThan(0);
+
+      // Check that all results come from the included domains
+      // Note: This test might be flaky if Exa doesn't return results from these domains
+      const allResultsFromIncludedDomains = result.data.sources.every(
+        (source: { url: string | URL }) => {
+          const domain = new URL(source.url).hostname;
+          return parameters.includeDomains.some(
+            (includeDomain) =>
+              domain === includeDomain || domain.endsWith('.' + includeDomain)
+          );
+        }
+      );
+
+      // Only check if we actually got sources
+      if (result.data.sources.length > 0) {
+        expect(allResultsFromIncludedDomains).toBe(true);
+      }
+    }
+  });
+
+  it('should filter results using excludeDomains parameter', async () => {
+    const eventType = 'beforeRequestHook';
+    const context = {
+      request: {
+        text: 'Latest iPhone reviews',
+        json: {
+          messages: [
+            {
+              role: 'user',
+              content: 'Latest iPhone reviews',
+            },
+          ],
+        },
+      },
+      requestType: 'chatComplete',
+    };
+
+    const parameters = {
+      credentials: testCreds,
+      excludeDomains: ['wikipedia.org', 'reddit.com'],
+      numResults: 3,
+    };
+
+    const result = await onlineHandler(
+      context as PluginContext,
+      parameters,
+      eventType
+    );
+
+    if (result.transformed && result.data.sources.length > 0) {
+      // Check that no results come from excluded domains
+      const noResultsFromExcludedDomains = result.data.sources.every(
+        (source: { url: string | URL }) => {
+          const domain = new URL(source.url).hostname;
+          return !parameters.excludeDomains.some(
+            (excludeDomain) =>
+              domain === excludeDomain || domain.endsWith('.' + excludeDomain)
+          );
+        }
+      );
+
+      expect(noResultsFromExcludedDomains).toBe(true);
+    }
+  });
+
+  it('should limit results based on numResults parameter', async () => {
+    const eventType = 'beforeRequestHook';
+    const context = {
+      request: {
+        text: 'Latest AI research papers',
+        json: {
+          messages: [
+            {
+              role: 'user',
+              content: 'Latest AI research papers',
+            },
+          ],
+        },
+      },
+      requestType: 'chatComplete',
+    };
+
+    // Test with a small number to clearly verify the limit
+    const specificNumResults = 2;
+    const parameters = {
+      credentials: testCreds,
+      numResults: specificNumResults,
+    };
+
+    const result = await onlineHandler(
+      context as PluginContext,
+      parameters,
+      eventType
+    );
+
+    if (result.transformed) {
+      // Verify we got the exact number of results requested (or fewer if not enough available)
+      expect(result.data.sources.length).toBeLessThanOrEqual(
+        specificNumResults
+      );
+
+      // If we got results, check the content structure in the transformed result
+      if (result.transformedData.request.json.messages[0].content) {
+        const content = result.transformedData.request.json.messages[0].content;
+
+        // Count the number of result entries in the content
+        // Each result starts with a number in brackets like [1], [2], etc.
+        const resultCount = (content.match(/\[\d+\]/g) || []).length;
+        expect(resultCount).toBeLessThanOrEqual(specificNumResults);
+      }
+    }
   });
 
   it('should handle invalid queries gracefully', async () => {
@@ -370,7 +413,7 @@ describe('exa online handler', () => {
 
     const parameters = {
       credentials: testCreds,
-      num_results: 1,
+      numResults: 1,
     };
 
     const result = await onlineHandler(

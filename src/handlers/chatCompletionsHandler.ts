@@ -23,7 +23,8 @@ export async function chatCompletionsHandler(c: Context): Promise<Response> {
     // model policies while preserving the legacy x-portkey-config header.
     const camelCaseConfig = applyModelRoute(
       constructConfigFromRequestHeaders(requestHeaders),
-      request?.model || requestHeaders['x-llm-model']
+      request?.model || requestHeaders['x-llm-model'],
+      c.get('readerNoteRequest') === true
     );
     const tryTargetsResponse = await tryTargetsRecursively(
       c,
@@ -37,7 +38,9 @@ export async function chatCompletionsHandler(c: Context): Promise<Response> {
 
     return tryTargetsResponse;
   } catch (err: any) {
-    console.log('chatCompletion error', err.message);
+    console.error(
+      `chatCompletionsHandler error: ${err.message} \n\n stackTrace: ${err.stack}`
+    );
     let statusCode = 500;
     let errorMessage = 'Something went wrong';
 

@@ -5,12 +5,14 @@ import {
   ErrorResponse,
   ProviderConfig,
 } from '../types';
+import { getAzureModelValue } from './utils';
 
 // TODOS: this configuration does not enforce the maximum token limit for the input parameter. If you want to enforce this, you might need to add a custom validation function or a max property to the ParameterConfig interface, and then use it in the input configuration. However, this might be complex because the token count is not a simple length check, but depends on the specific tokenization method used by the model.
 
 export const AzureOpenAIChatCompleteConfig: ProviderConfig = {
   model: {
     param: 'model',
+    transform: getAzureModelValue,
   },
   messages: {
     param: 'messages',
@@ -47,13 +49,6 @@ export const AzureOpenAIChatCompleteConfig: ProviderConfig = {
   n: {
     param: 'n',
     default: 1,
-  },
-  logprobs: {
-    param: 'logprobs',
-    default: false,
-  },
-  top_logprobs: {
-    param: 'top_logprobs',
   },
   stream: {
     param: 'stream',
@@ -108,23 +103,27 @@ export const AzureOpenAIChatCompleteConfig: ProviderConfig = {
   reasoning_effort: {
     param: 'reasoning_effort',
   },
-  thinking: {
-    param: 'thinking',
-  },
-  enable_thinking: {
-    param: 'enable_thinking',
-  },
-  thinking_budget: {
-    param: 'thinking_budget',
-  },
-  preserve_thinking: {
-    param: 'preserve_thinking',
-  },
-  clear_thinking: {
-    param: 'clear_thinking',
-  },
   stream_options: {
     param: 'stream_options',
+  },
+  logprobs: {
+    param: 'logprobs',
+    default: false,
+  },
+  top_logprobs: {
+    param: 'top_logprobs',
+  },
+  web_search_options: {
+    param: 'web_search_options',
+  },
+  prompt_cache_key: {
+    param: 'prompt_cache_key',
+  },
+  safety_identifier: {
+    param: 'safety_identifier',
+  },
+  verbosity: {
+    param: 'verbosity',
   },
 };
 

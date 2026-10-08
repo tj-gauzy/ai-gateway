@@ -20,7 +20,8 @@ export async function completionsHandler(c: Context): Promise<Response> {
     let requestHeaders = Object.fromEntries(c.req.raw.headers);
     const camelCaseConfig = applyModelRoute(
       constructConfigFromRequestHeaders(requestHeaders),
-      request?.model || requestHeaders['x-llm-model']
+      request?.model || requestHeaders['x-llm-model'],
+      c.get('readerNoteRequest') === true
     );
 
     const tryTargetsResponse = await tryTargetsRecursively(
@@ -35,7 +36,7 @@ export async function completionsHandler(c: Context): Promise<Response> {
 
     return tryTargetsResponse;
   } catch (err: any) {
-    console.log('completion error', err.message);
+    console.error('completionsHandler error: ', err);
     let statusCode = 500;
     let errorMessage = 'Something went wrong';
 

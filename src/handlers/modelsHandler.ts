@@ -1,10 +1,6 @@
-import { Context } from 'hono';
-import models from '../data/models.json';
-import providers from '../data/providers.json';
-import {
-  getLlmRuntimeConfig,
-  getRuntimeModels,
-} from '../runtimeConfig';
+import { Context, Next } from 'hono';
+import { HEADER_KEYS } from '../globals';
+import { env } from 'hono/adapter';
 
 /**
  * Handles the models request. Returns a list of models supported by the Ai gateway.
@@ -12,46 +8,51 @@ import {
  * @param c - The Hono context
  * @returns - The response
  */
-export async function modelsHandler(c: Context): Promise<Response> {
-  const runtimeModels = getRuntimeModels(getLlmRuntimeConfig());
-  // Discovery lists deployable routes; the reference endpoint remains the
-  // full Portkey catalog for clients that use it as documentation.
-  if (c.req.path === '/v1/models' && runtimeModels.length) {
-    return c.json({object: 'list', data: runtimeModels, count: runtimeModels.length});
-  }
-  // Keep Portkey's built-in catalogue for backwards compatibility and put
-  // deployment-specific aliases (for example lite, flash, and pro) first.
-  const allModels = [
-    ...runtimeModels,
-    ...models.data.filter(
-      (model: any) => !runtimeModels.some((runtimeModel) => runtimeModel.id === model.id)
-    ),
-  ];
-  // If the request does not contain a provider query param, return all models. Add a count as well.
-  const provider = c.req.query('provider');
-  if (!provider) {
-    return c.json({
-      ...models,
-      data: allModels,
-      count: allModels.length,
-    });
-  } else {
-    // Filter the models by the provider
-    const filteredModels = allModels.filter(
-      (model: any) =>
-        model.provider?.id === provider || model.providers?.includes(provider)
-    );
-    return c.json({
-      ...models,
-      data: filteredModels,
-      count: filteredModels.length,
-    });
-  }
-}
+export const modelsHandler = async (
+  context: Context,
+  next: Next
+): Promise<Response | void> => {
+  const fetchOptions: Record<string, any> = {};
+  fetchOptions['method'] = context.req.method;
 
-export async function providersHandler(c: Context): Promise<Response> {
-  return c.json({
-    ...providers,
-    count: providers.data.length,
+  const controlPlaneURL = env(context).ALBUS_BASEPATH;
+
+  const headers = Object.fromEntries(context.req.raw.headers);
+
+  const authHeader = headers['Authorization'] || headers['authorization'];
+
+  const apiKey =
+    headers[HEADER_KEYS.API_KEY] || authHeader?.replace('Bearer ', '');
+  let config: any = headers[HEADER_KEYS.CONFIG];
+  if (config && typeof config === 'string') {
+    try {
+      config = JSON.parse(config);
+    } catch {
+      config = {};
+    }
+  }
+  const providerHeader = headers[HEADER_KEYS.PROVIDER];
+  const virtualKey = headers[HEADER_KEYS.VIRTUAL_KEY];
+
+  const containsProvider =
+    providerHeader || virtualKey || config?.provider || config?.virtual_key;
+
+  if (containsProvider || !controlPlaneURL) {
+    return next();
+  }
+
+  // Strip gateway endpoint for models endpoint.
+  const urlObject = new URL(context.req.url);
+  const requestRoute = `${controlPlaneURL}${context.req.path.replace('/v1/', '/v2/')}${urlObject.search}`;
+  fetchOptions['headers'] = {
+    [HEADER_KEYS.API_KEY]: apiKey,
+  };
+
+  const resp = await fetch(requestRoute, fetchOptions);
+  return new Response(resp.body, {
+    status: resp.status,
+    headers: {
+      'content-type': 'application/json',
+    },
   });
-}
+};

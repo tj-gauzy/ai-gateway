@@ -3,8 +3,8 @@
  *
  * The gateway is also used as a standalone Portkey-compatible application,
  * so this module deliberately keeps the configuration optional.  When the
- * ReaderNote server starts it calls `setLlmRuntimeConfig`; standalone users
- * can use the `LLM_MODEL_ROUTES` environment variable instead.
+ * ReaderNote server starts it calls `setLlmRuntimeConfig` and marks its
+ * authenticated requests. Upstream Portkey requests keep their own routing.
  */
 
 export interface RuntimeModelTarget {
@@ -100,9 +100,8 @@ function routeFromValue(id: string, value: any, defaults: Record<string, any> = 
   const strategy = {
     ...rawStrategy,
     mode: String(rawStrategy.mode || 'loadbalance').toLowerCase(),
-    ...(String(rawStrategy.mode || '').toLowerCase() === 'fallback' &&
-    rawStrategy.allowExceptionFallback === undefined
-      ? { allowExceptionFallback: true }
+    ...(rawStrategy.on_status_codes
+      ? { onStatusCodes: rawStrategy.on_status_codes }
       : {}),
   };
   return {
@@ -237,7 +236,12 @@ export function findModelRoute(model: string | undefined, config = runtimeConfig
 }
 
 /** Convert a route into the config shape consumed by tryTargetsRecursively. */
-export function applyModelRoute(config: any, model: string | undefined) {
+export function applyModelRoute(
+  config: any,
+  model: string | undefined,
+  readerNoteRequest = false
+) {
+  if (!readerNoteRequest) return config;
   const route = findModelRoute(model);
   if (!route) return config;
 

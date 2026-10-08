@@ -1,3 +1,4 @@
+import BytezConfig from './bytez';
 import AI21Config from './ai21';
 import AnthropicConfig from './anthropic';
 import AnyscaleConfig from './anyscale';
@@ -55,6 +56,24 @@ import NebiusConfig from './nebius';
 import RecraftAIConfig from './recraft-ai';
 import MilvusConfig from './milvus';
 import ReplicateConfig from './replicate';
+import LeptonConfig from './lepton';
+import KlusterAIConfig from './kluster-ai';
+import NscaleConfig from './nscale';
+import HyperbolicConfig from './hyperbolic';
+import { FeatherlessAIConfig } from './featherless-ai';
+import KrutrimConfig from './krutrim';
+import AI302Config from './302ai';
+import MeshyConfig from './meshy';
+import Tripo3DConfig from './tripo3d';
+import { NextBitConfig } from './nextbit';
+import CometAPIConfig from './cometapi';
+import ZAIConfig from './z-ai';
+import MatterAIConfig from './matterai';
+import ModalConfig from './modal';
+import OracleConfig from './oracle';
+import IOIntelligenceConfig from './iointelligence';
+import AIBadgrConfig from './aibadgr';
+import OVHcloudConfig from './ovhcloud';
 
 const Providers: { [key: string]: ProviderConfigs } = {
   openai: OpenAIConfig,
@@ -110,6 +129,25 @@ const Providers: { [key: string]: ProviderConfigs } = {
   'recraft-ai': RecraftAIConfig,
   milvus: MilvusConfig,
   replicate: ReplicateConfig,
+  lepton: LeptonConfig,
+  'kluster-ai': KlusterAIConfig,
+  nscale: NscaleConfig,
+  hyperbolic: HyperbolicConfig,
+  bytez: BytezConfig,
+  'featherless-ai': FeatherlessAIConfig,
+  krutrim: KrutrimConfig,
+  '302ai': AI302Config,
+  cometapi: CometAPIConfig,
+  matterai: MatterAIConfig,
+  meshy: MeshyConfig,
+  nextbit: NextBitConfig,
+  tripo3d: Tripo3DConfig,
+  modal: ModalConfig,
+  'z-ai': ZAIConfig,
+  oracle: OracleConfig,
+  iointelligence: IOIntelligenceConfig,
+  aibadgr: AIBadgrConfig,
+  ovhcloud: OVHcloudConfig,
 };
 
 export default Providers;
